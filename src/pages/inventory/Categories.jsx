@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Boxes, Pencil, Plus, Tags, Trash2 } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { compactMoney, money, number } from '../../lib/format'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, SectionHeading } from '../../components/ui'
 

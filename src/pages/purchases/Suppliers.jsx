@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Archive, Building2, Eye, Mail, MapPin, Pencil, Phone, Plus, Search, Truck } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { supplierBalances } from '../../lib/analytics'
 import { formatDate, money, number, uid } from '../../lib/format'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, SearchInput, Select, StatCard, StatusPill } from '../../components/ui'

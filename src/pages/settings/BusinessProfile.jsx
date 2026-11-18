@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Building2, MapPin, Phone, RotateCcw, Save, Store } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { formatDate } from '../../lib/format'
 import { Button, Card, ConfirmDialog, Field, PageHeader, SectionHeading } from '../../components/ui'
 

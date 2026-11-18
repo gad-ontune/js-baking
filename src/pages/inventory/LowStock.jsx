@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ArrowDownToLine, CircleAlert, PackageCheck, ShoppingCart } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { itemStatus, money, number, uid } from '../../lib/format'
 import { Badge, Button, Card, EmptyState, Field, Modal, PageHeader, ProgressBar, StatCard, StatusPill } from '../../components/ui'
 

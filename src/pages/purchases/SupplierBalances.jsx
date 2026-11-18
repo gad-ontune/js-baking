@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Banknote, Building2, Scale, Wallet } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { supplierBalances } from '../../lib/analytics'
 import { money, number } from '../../lib/format'
 import { Badge, Button, Card, EmptyState, PageHeader, ProgressBar, StatCard } from '../../components/ui'

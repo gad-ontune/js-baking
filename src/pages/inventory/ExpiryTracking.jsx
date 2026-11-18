@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Apple, CalendarClock, TriangleAlert } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { daysUntil, formatDate, number, uid } from '../../lib/format'
 import { Badge, Button, Card, EmptyState, Field, Modal, PageHeader, StatCard, StatusPill } from '../../components/ui'
 

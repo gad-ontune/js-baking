@@ -129,11 +129,11 @@ export function createSeedData() {
     ['Straws', 'Packaging Materials', 'Packets', 18, 6, 120, 0, 260],
     ['Labels', 'Packaging Materials', 'Packets', 12, 4, 180, 0, 400],
     ['Cleaning detergent', 'Cleaning & Supplies', 'Bottles', 8, 3, 260, 0, 220],
-    ['Cakes', 'Finished Products', 'Pieces', 14, 4, 1800, 3200, 2],
-    ['Cupcakes', 'Finished Products', 'Pieces', 42, 12, 110, 260, 2],
-    ['Cake slices', 'Finished Products', 'Pieces', 20, 8, 220, 450, 1],
-    ['Fresh juices', 'Finished Products', 'L', 18, 6, 280, 620, 1],
-    ['Bottled juices', 'Finished Products', 'Bottles', 52, 20, 120, 280, 12],
+    ['Cakes', 'Finished Products', 'Pieces', 120, 4, 1800, 3200, 2],
+    ['Cupcakes', 'Finished Products', 'Pieces', 300, 12, 110, 260, 2],
+    ['Cake slices', 'Finished Products', 'Pieces', 180, 8, 220, 450, 1],
+    ['Fresh juices', 'Finished Products', 'L', 150, 6, 280, 620, 1],
+    ['Bottled juices', 'Finished Products', 'Bottles', 400, 20, 120, 280, 12],
   ]
 
   const itemsByKey = {}
@@ -405,7 +405,11 @@ export function createSeedData() {
     ['Passion fruits', 3, 'Quality check removed damaged fruit'],
     ['Pineapples', 0, 'Sold out — awaiting next delivery'],
     ['Juice bottles', 42, 'Stock count correction after delivery'],
-    ['Cupcakes', 9, 'Cycle count correction'],
+    ['Cakes', 3, 'End-of-day finished stock count'],
+    ['Cupcakes', 9, 'End-of-day finished stock count'],
+    ['Cake slices', 6, 'End-of-day finished stock count'],
+    ['Fresh juices', 4, 'End-of-day finished stock count'],
+    ['Bottled juices', 18, 'End-of-day finished stock count'],
   ]
   corrections.forEach(([name, target, reason], index) => {
     const item = itemsByKey[name]

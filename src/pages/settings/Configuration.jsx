@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Pencil, Plus, Settings2, Tag, Trash2, X } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { money, uid } from '../../lib/format'
 import { Badge, Button, Card, EmptyState, Field, IconButton, Modal, PageHeader, SectionHeading, Select } from '../../components/ui'
 

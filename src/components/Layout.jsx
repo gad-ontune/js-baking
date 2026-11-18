@@ -111,16 +111,16 @@ const ROUTE_TITLES = {
 }
 
 function Sidebar({ collapsed, onToggle, onNavigate }) {
-  const { can } = useStore()
+  const { can, data } = useStore()
 
   return (
     <aside className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-line bg-white transition-all duration-300 ${collapsed ? 'w-[76px]' : 'w-[264px]'}`}>
       <div className={`flex h-[74px] items-center border-b border-line ${collapsed ? 'justify-center px-2' : 'justify-between px-5'}`}>
         <NavLink to="/dashboard" className="flex items-center gap-3" onClick={onNavigate}>
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-bakery-600 font-display text-lg font-bold text-white shadow-sm">C</span>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-bakery-600 font-display text-base font-bold text-white shadow-sm">{data.business.logoText?.slice(0, 2) || 'C'}</span>
           {!collapsed && (
             <span className="min-w-0">
-              <span className="block truncate font-display text-base font-bold leading-tight text-ink">Crumb & Co.</span>
+              <span className="block truncate font-display text-base font-bold leading-tight text-ink">{data.business.name}</span>
               <span className="block truncate text-[10px] font-semibold uppercase tracking-widest text-bakery-600">Business Suite</span>
             </span>
           )}

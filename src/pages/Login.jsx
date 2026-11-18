@@ -5,7 +5,7 @@ import { useStore } from '../lib/store'
 import { Button, Field } from '../components/ui'
 
 export default function Login() {
-  const { currentUser, signIn, notify } = useStore()
+  const { currentUser, signIn, notify, data } = useStore()
   const navigate = useNavigate()
   const [username, setUsername] = useState('amina')
   const [password, setPassword] = useState('owner123')
@@ -31,7 +31,7 @@ export default function Login() {
     }, 350)
   }
 
-  const useDemo = (user, pass) => {
+  const fillDemo = (user, pass) => {
     setUsername(user)
     setPassword(pass)
     setError('')
@@ -45,9 +45,9 @@ export default function Login() {
         <div className="pointer-events-none absolute -bottom-32 -left-24 h-96 w-96 rounded-full bg-bakery-700/60 blur-3xl" />
 
         <div className="relative flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white font-display text-xl font-bold text-bakery-800">C</span>
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white font-display text-lg font-bold text-bakery-800">{data.business.logoText?.slice(0, 2) || 'C'}</span>
           <div>
-            <p className="font-display text-lg font-bold leading-tight">Crumb & Co.</p>
+            <p className="font-display text-lg font-bold leading-tight">{data.business.name}</p>
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-bakery-200">Business Suite</p>
           </div>
         </div>
@@ -83,9 +83,9 @@ export default function Login() {
       <div className="flex flex-1 items-center justify-center px-5 py-12 sm:px-10">
         <div className="w-full max-w-md animate-fade-in">
           <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-bakery-600 font-display text-xl font-bold text-white">C</span>
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-bakery-600 font-display text-lg font-bold text-white">{data.business.logoText?.slice(0, 2) || 'C'}</span>
             <div>
-              <p className="font-display text-lg font-bold leading-tight">Crumb & Co.</p>
+              <p className="font-display text-lg font-bold leading-tight">{data.business.name}</p>
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-bakery-600">Business Suite</p>
             </div>
           </div>
@@ -131,14 +131,14 @@ export default function Login() {
           <div className="mt-8 rounded-2xl border border-line bg-white p-4">
             <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted">Demo accounts</p>
             <div className="grid gap-2">
-              <button type="button" onClick={() => useDemo('amina', 'owner123')} className="flex items-center justify-between rounded-xl border border-bakery-100 bg-bakery-50 px-3 py-2.5 text-left transition hover:border-bakery-300">
+              <button type="button" onClick={() => fillDemo('amina', 'owner123')} className="flex items-center justify-between rounded-xl border border-bakery-100 bg-bakery-50 px-3 py-2.5 text-left transition hover:border-bakery-300">
                 <span>
                   <span className="block text-sm font-semibold text-ink">Owner account</span>
                   <span className="block text-xs text-muted">amina / owner123 · Full access</span>
                 </span>
                 <span className="badge bg-white text-bakery-700">Owner</span>
               </button>
-              <button type="button" onClick={() => useDemo('brian', 'staff123')} className="flex items-center justify-between rounded-xl border border-line px-3 py-2.5 text-left transition hover:border-bakery-300">
+              <button type="button" onClick={() => fillDemo('brian', 'staff123')} className="flex items-center justify-between rounded-xl border border-line px-3 py-2.5 text-left transition hover:border-bakery-300">
                 <span>
                   <span className="block text-sm font-semibold text-ink">Staff account</span>
                   <span className="block text-xs text-muted">brian / staff123 · Limited access</span>

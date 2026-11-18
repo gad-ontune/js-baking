@@ -14,7 +14,7 @@ import {
   Search,
   SlidersHorizontal,
 } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { inventorySummary, salesByProduct } from '../../lib/analytics'
 import { compactMoney, formatDate, itemStatus, money, number, statusLabel, uid } from '../../lib/format'
 import {

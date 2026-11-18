@@ -102,7 +102,7 @@ export default function Dashboard() {
       <PageHeader
         eyebrow="Business overview"
         title={`${greeting}, ${currentUser?.name.split(' ')[0] || 'there'} 👋`}
-        subtitle="Here is how Crumb & Co. is performing right now."
+        subtitle={`Here is how ${data.business.name} is performing right now.`}
         actions={
           <>
             <PeriodPicker period={period} onPeriodChange={setPeriod} custom={custom} onCustomChange={setCustom} />

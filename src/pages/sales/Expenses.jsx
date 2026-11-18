@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { CircleDollarSign, Pencil, Plus, ReceiptText, Search, Trash2 } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { expensesByCategory, expensesInRange } from '../../lib/analytics'
 import { compactMoney, formatDate, inRange, money, number, periodRange, uid } from '../../lib/format'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, PeriodPicker, SearchInput, Select, StatCard } from '../../components/ui'

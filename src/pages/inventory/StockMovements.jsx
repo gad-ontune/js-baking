@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ArrowDownToLine, ArrowUpFromLine, Boxes, History, Search } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { formatDate, number, periodRange, inRange } from '../../lib/format'
 import { Badge, Card, EmptyState, PageHeader, SearchInput, Select, StatCard } from '../../components/ui'
 
@@ -17,8 +17,9 @@ export default function StockMovements() {
   const filtered = useMemo(() => data.movements.filter((movement) => {
     if (type !== 'all' && movement.type !== type) return false
     if (!inRange(movement.date, range)) return false
-    return `${itemName(movement.itemId)} ${movement.reason} ${movement.reference} ${movement.type}`.toLowerCase().includes(search.toLowerCase())
-  }), [data.movements, search, type, range])
+    const name = data.inventory.find((item) => item.id === movement.itemId)?.name || 'Unknown item'
+    return `${name} ${movement.reason} ${movement.reference} ${movement.type}`.toLowerCase().includes(search.toLowerCase())
+  }), [data.movements, data.inventory, search, type, range])
 
   const stats = useMemo(() => {
     const inMovements = filtered.filter((movement) => movement.quantity > 0)

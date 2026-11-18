@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { createSeedData } from './seed'
 import { uid } from './format'
 
-const STORAGE_KEY = 'crumb-co-bakery-v1'
+const STORAGE_KEY = 'crumb-co-bakery-v2'
 const StoreContext = createContext(null)
 
 const ROLE_PERMISSIONS = {

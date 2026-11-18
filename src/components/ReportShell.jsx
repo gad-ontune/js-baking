@@ -1,6 +1,7 @@
 import { Download, Printer } from 'lucide-react'
 import { useStore } from '../lib/store'
-import { downloadCSV, formatDateTime, periodLabel } from '../lib/format'
+import { periodLabel } from '../lib/analytics'
+import { downloadCSV, formatDateTime } from '../lib/format'
 import { Button, PageHeader, PeriodPicker } from './ui'
 
 export default function ReportShell({ eyebrow = 'Reports & analytics', title, subtitle, period, onPeriodChange, custom, onCustomChange, rows = [], filename = 'report', filters, children }) {

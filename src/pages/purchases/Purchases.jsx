@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Banknote, Eye, FilePlus2, PackagePlus, Plus, Receipt, RotateCcw, Search, Truck } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { expensesByCategory } from '../../lib/analytics'
 import { formatDate, inRange, money, number, periodRange, uid } from '../../lib/format'
 import {

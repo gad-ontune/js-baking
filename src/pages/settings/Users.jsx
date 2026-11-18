@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { KeyRound, Pencil, Plus, ShieldCheck, UserCog, Users as UsersIcon } from 'lucide-react'
-import { useStore } from '../lib/store'
+import { useStore } from '../../lib/store'
 import { formatDate, uid } from '../../lib/format'
 import { Avatar, Badge, Button, Card, EmptyState, Field, IconButton, Modal, PageHeader, SectionHeading, Select, StatCard } from '../../components/ui'
 
@@ -127,7 +127,12 @@ function UserForm({ user, onClose, onSave }) {
   const submit = () => {
     if (!form.name.trim() || !form.username.trim()) return setError('Name and username are required.')
     if (!user && !form.password) return setError('A password is required for new users.')
-    onSave({ ...form, name: form.name.trim(), username: form.username.trim() })
+    onSave({
+      ...form,
+      name: form.name.trim(),
+      username: form.username.trim(),
+      password: user && !form.password ? user.password : form.password,
+    })
   }
   return (
     <Modal
