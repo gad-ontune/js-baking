@@ -1,4 +1,4 @@
-# Crumb & Co. — Bakery Business Suite
+# JS Baking House — Business Suite
 
 A polished, responsive internal management application for a cake bakery and juice business. It brings inventory, purchasing, suppliers, production, sales, expenses, reports and settings into one calm workspace.
 
@@ -114,7 +114,7 @@ src/
   main.jsx          App entry point
 ```
 
-Data is persisted in `localStorage` under `crumb-co-bakery-v2`. All mutations flow through `src/lib/store.jsx`, which keeps the UI independent of the storage mechanism. That boundary is deliberately kept clean so the browser store can be replaced by FastAPI/PostgreSQL endpoints during the backend phase without rewriting the screens.
+Data is persisted in `localStorage` under `js-baking-house-v3`. All mutations flow through `src/lib/store.jsx`, which keeps the UI independent of the storage mechanism. That boundary is deliberately kept clean so the browser store can be replaced by FastAPI/PostgreSQL endpoints during the backend phase without rewriting the screens.
 
 ---
 

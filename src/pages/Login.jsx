@@ -77,7 +77,7 @@ export default function Login() {
           </div>
         </div>
 
-        <p className="relative text-xs text-bakery-200/70">© {new Date().getFullYear()} Crumb & Co. Bakery · Internal management system</p>
+        <p className="relative text-xs text-bakery-200/70">© {new Date().getFullYear()} {data.business.name} · Internal management system</p>
       </div>
 
       <div className="flex flex-1 items-center justify-center px-5 py-12 sm:px-10">
