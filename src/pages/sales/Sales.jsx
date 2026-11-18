@@ -20,7 +20,7 @@ import {
   StatusPill,
 } from '../../components/ui'
 
-const blankLine = () => ({ productId: '', quantity: 1, unitPrice: 0 })
+const blankLine = () => ({ productId: '', productName: '', quantity: 1, unitPrice: 0 })
 
 function SaleForm({ data, onClose, onSave, error: externalError }) {
   const activeProducts = data.products.filter((product) => !product.archived)
@@ -36,31 +36,42 @@ function SaleForm({ data, onClose, onSave, error: externalError }) {
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const setLine = (index, key, value) => setForm((current) => ({
     ...current,
-    lines: current.lines.map((line, lineIndex) => {
-      if (lineIndex !== index) return line
-      if (key === 'productId') {
-        const product = data.products.find((candidate) => candidate.id === value)
-        return { ...line, productId: value, unitPrice: product?.price || 0 }
-      }
-      return { ...line, [key]: value }
-    }),
+    lines: current.lines.map((line, lineIndex) => (lineIndex === index ? { ...line, [key]: value } : line)),
   }))
+
+  const findProduct = (line) =>
+    data.products.find((product) => product.id === line.productId)
+    || data.products.find((product) => product.name.toLowerCase() === line.productName?.trim().toLowerCase())
+
+  const handleProductName = (index, value) => {
+    setForm((current) => ({
+      ...current,
+      lines: current.lines.map((line, lineIndex) => {
+        if (lineIndex !== index) return line
+        const match = data.products.find((product) => product.name.toLowerCase() === value.trim().toLowerCase())
+        return {
+          ...line,
+          productName: value,
+          productId: match?.id || '',
+          unitPrice: match ? match.price : line.unitPrice,
+        }
+      }),
+    }))
+  }
 
   const subtotal = form.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0)
   const total = subtotal - Number(form.discount || 0)
-  const cost = form.lines.reduce((sum, line) => {
-    const product = data.products.find((candidate) => candidate.id === line.productId)
-    return sum + Number(line.quantity || 0) * (product?.cost || 0)
-  }, 0)
+  const cost = form.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * (findProduct(line)?.cost || 0), 0)
+  const newProductCount = form.lines.filter((line) => line.productName?.trim() && !findProduct(line)).length
 
   const submit = () => {
-    const validLines = form.lines.filter((line) => line.productId && Number(line.quantity) > 0)
+    const validLines = form.lines.filter((line) => line.productName?.trim() && Number(line.quantity) > 0)
     if (!validLines.length) return setError('Add at least one product to the sale.')
     if (Number(form.discount) < 0) return setError('Discount cannot be negative.')
     if (total < 0) return setError('Discount cannot exceed the sale total.')
 
     for (const line of validLines) {
-      const product = data.products.find((candidate) => candidate.id === line.productId)
+      const product = findProduct(line)
       if (product?.trackedItemId) {
         const item = data.inventory.find((candidate) => candidate.id === product.trackedItemId)
         if (item.quantity < Number(line.quantity)) {
@@ -72,10 +83,19 @@ function SaleForm({ data, onClose, onSave, error: externalError }) {
     onSave({
       ...form,
       lines: validLines.map((line) => {
-        const product = data.products.find((candidate) => candidate.id === line.productId)
+        const product = findProduct(line)
+        const name = product?.name || line.productName.trim()
         const quantity = Number(line.quantity)
         const unitPrice = Number(line.unitPrice)
-        return { productId: product.id, name: product.name, quantity, unitPrice, unitCost: product.cost, subtotal: quantity * unitPrice }
+        return {
+          productId: product?.id || '',
+          productName: name,
+          name,
+          quantity,
+          unitPrice,
+          unitCost: product?.cost || 0,
+          subtotal: quantity * unitPrice,
+        }
       }),
       discount: Number(form.discount || 0),
       subtotal,
@@ -106,24 +126,37 @@ function SaleForm({ data, onClose, onSave, error: externalError }) {
         </div>
 
         <div>
-          <div className="mb-2 flex items-center justify-between">
-            <p className="label mb-0">Products sold</p>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <p className="label mb-0">Products sold</p>
+              <p className="mt-1 text-[11px] text-muted">Type a product name — choose an existing one or enter a new product.</p>
+            </div>
             <Button size="sm" icon={Plus} onClick={() => set('lines', [...form.lines, blankLine()])}>Add product</Button>
           </div>
+          <datalist id="sale-product-options">
+            {activeProducts.map((item) => <option key={item.id} value={item.name} />)}
+          </datalist>
           <div className="space-y-2">
             {form.lines.map((line, index) => {
-              const product = data.products.find((candidate) => candidate.id === line.productId)
+              const product = findProduct(line)
               const available = product?.trackedItemId ? data.inventory.find((item) => item.id === product.trackedItemId)?.quantity : null
+              const isNew = Boolean(line.productName?.trim()) && !product
               return (
                 <div key={index} className="grid gap-2 rounded-xl border border-line bg-[#FCFAF7] p-2 sm:grid-cols-[1.5fr_0.7fr_0.9fr_auto]">
-                  <Select value={line.productId} onChange={(event) => setLine(index, 'productId', event.target.value)}>
-                    <option value="">Select product…</option>
-                    {activeProducts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                  </Select>
                   <div>
-                    <input type="number" min="1" step="1" className="input" placeholder="Qty" value={line.quantity} onChange={(event) => setLine(index, 'quantity', event.target.value)} />
-                    {available !== null && available !== undefined && <p className="mt-1 text-[10px] text-muted">Stock: {number(available)}</p>}
+                    <input
+                      list="sale-product-options"
+                      className="input"
+                      placeholder="Type or choose product…"
+                      value={line.productName}
+                      onChange={(event) => handleProductName(index, event.target.value)}
+                    />
+                    <div className="mt-1 flex items-center gap-2">
+                      {isNew && <span className="text-[10px] font-bold uppercase tracking-wide text-bakery-700">New product</span>}
+                      {available !== null && available !== undefined && <span className="text-[10px] text-muted">Stock: {number(available)}</span>}
+                    </div>
                   </div>
+                  <input type="number" min="1" step="1" className="input" placeholder="Qty" value={line.quantity} onChange={(event) => setLine(index, 'quantity', event.target.value)} />
                   <input type="number" min="0" step="0.01" className="input" placeholder="Unit price" value={line.unitPrice} onChange={(event) => setLine(index, 'unitPrice', event.target.value)} />
                   <div className="flex items-center gap-2">
                     <span className="num min-w-[70px] text-right text-sm font-semibold">{money(line.quantity * line.unitPrice)}</span>
@@ -133,6 +166,11 @@ function SaleForm({ data, onClose, onSave, error: externalError }) {
               )
             })}
           </div>
+          {newProductCount > 0 && (
+            <p className="mt-2 rounded-lg bg-bakery-50 px-3 py-2 text-[11px] text-bakery-800">
+              {newProductCount} new product{newProductCount === 1 ? '' : 's'} will be added to your catalogue when this sale is completed.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
@@ -208,13 +246,49 @@ export default function Sales() {
   const createSale = (form) => {
     const reference = `SAL-${new Date().getFullYear()}-${String(data.sales.length + 1).padStart(3, '0')}`
     const date = new Date(form.date).toISOString()
+    const createdProducts = []
+
     mutate((draft) => {
+      const saleLines = form.lines.map((line) => {
+        let product = draft.products.find((candidate) => candidate.id === line.productId)
+        if (!product && line.productName) {
+          product = draft.products.find((candidate) => candidate.name.toLowerCase() === line.productName.trim().toLowerCase())
+        }
+        if (!product) {
+          const name = line.productName.trim()
+          product = {
+            id: uid('prod'),
+            sku: `PRD-${String(draft.products.length + 1).padStart(3, '0')}`,
+            name,
+            category: 'Other',
+            description: 'Added directly from a sales record',
+            cost: 0,
+            price: Number(line.unitPrice) || 0,
+            trackedItemId: null,
+            archived: false,
+            createdAt: new Date().toISOString(),
+          }
+          draft.products.push(product)
+          createdProducts.push(name)
+          addAudit(draft, 'PRODUCT_CREATED', 'Product', `${name} added to catalogue from sale ${reference}`)
+        }
+        return {
+          ...line,
+          productId: product.id,
+          productName: product.name,
+          name: product.name,
+          unitCost: product.cost || 0,
+        }
+      })
+
+      const saleCost = saleLines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0)
       draft.sales.unshift({
-        id: uid('sal'), reference, date, items: form.lines, subtotal: form.subtotal, discount: form.discount,
-        total: form.total, cost: form.cost, paymentMethod: form.paymentMethod, notes: form.notes,
+        id: uid('sal'), reference, date, items: saleLines, subtotal: form.subtotal, discount: form.discount,
+        total: form.total, cost: saleCost, paymentMethod: form.paymentMethod, notes: form.notes,
         voided: false, createdBy: draft.sessionUserId, createdAt: new Date().toISOString(),
       })
-      form.lines.forEach((line) => {
+
+      saleLines.forEach((line) => {
         const product = draft.products.find((candidate) => candidate.id === line.productId)
         if (!product?.trackedItemId) return
         const item = draft.inventory.find((candidate) => candidate.id === product.trackedItemId)
@@ -229,7 +303,10 @@ export default function Sales() {
       })
       addAudit(draft, 'SALE_RECORDED', 'Sale', `${reference} recorded for ${money(form.total)}`)
     })
-    notify('Sale completed. Revenue and stock updated.')
+
+    notify(createdProducts.length
+      ? `Sale completed. New product${createdProducts.length === 1 ? '' : 's'} added to your catalogue.`
+      : 'Sale completed. Revenue and stock updated.')
     setCreating(false)
     setFormError('')
   }

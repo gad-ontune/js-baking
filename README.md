@@ -65,6 +65,7 @@ npm run preview
 
 ### 5. Sales & expenses
 - Multi-product sales with discounts, payment methods and notes
+- Product field is writable: choose an existing product or type a new one, which is added to the catalogue automatically
 - Configured product costs used for COGS and profit calculations
 - Finished-product stock deduction for tracked products
 - Negative stock prevention
