@@ -1,0 +1,68 @@
+from functools import lru_cache
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
+
+    app_name: str = 'JS Baking House API'
+    api_prefix: str = '/api/v1'
+    environment: str = 'development'
+
+    database_url: str = 'sqlite:///./jsbh_dev.db'
+    cors_origins: str = 'http://localhost:5173'
+
+    cookie_secure: bool = False
+    cookie_samesite: str = 'lax'
+    session_cookie_name: str = 'jsbh_session'
+    csrf_cookie_name: str = 'jsbh_csrf'
+
+    session_absolute_hours: int = 12
+    session_idle_minutes: int = 30
+
+    argon2_time_cost: int = 2
+    argon2_memory_cost_kib: int = 19456
+    argon2_parallelism: int = 1
+
+    login_attempt_limit: int = 5
+    login_attempt_window_minutes: int = 15
+    ip_request_limit: int = 120
+    ip_request_window_minutes: int = 15
+
+    seed_owner_username: str = ''
+    seed_owner_password: str = ''
+    seed_owner_email: str = ''
+
+    @field_validator('cookie_samesite')
+    @classmethod
+    def validate_samesite(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in {'lax', 'strict', 'none'}:
+            raise ValueError('COOKIE_SAMESITE must be lax, strict or none')
+        return normalized
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() == 'production'
+
+    @property
+    def session_absolute_seconds(self) -> int:
+        return self.session_absolute_hours * 3600
+
+    @property
+    def session_idle_seconds(self) -> int:
+        return self.session_idle_minutes * 60
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

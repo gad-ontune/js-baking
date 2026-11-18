@@ -239,7 +239,7 @@ No backup job, encrypted off-server storage, retention policy, integrity check, 
 
 MFA, password reset, TOTP recovery codes, server-side session revocation, CSRF tokens, object-level authorization, PostgreSQL persistence, encrypted backups, production security headers, WAF, and independent penetration testing are all **not implemented** at assessment time.
 
-No production compliance claim is made.
+No production compliance claim is made. This section records the initial assessment; current status is recorded in sections 6–8.
 
 ---
 
@@ -273,3 +273,108 @@ No production compliance claim is made.
 - `npm run audit:npm` — passes at `--audit-level=high`; 2 moderate advisories remain and require a tested React Router v7 upgrade.
 
 **Remaining Phase 1 risk:** these are browser-side improvements. They reduce accidental misuse and common client attacks, but they do not create a security boundary. A user with devtools access can still alter local state. Backend enforcement remains mandatory.
+
+---
+
+## 7. Implementation progress — Phase 2 (backend foundation)
+
+**Status:** implemented and verified. The React SPA is **not yet connected** to this API; see section 8.
+
+| Control | Implementation location and configuration | Automated test | Result |
+|---|---|---|---|
+| Argon2id password hashing | `backend/app/security.py`; `ARGON2_TIME_COST=2`, `ARGON2_MEMORY_COST_KIB=19456`, `ARGON2_PARALLELISM=1`; 32-byte hash, 16-byte salt | `test_password_hashing_uses_argon2id_and_verifies`, `test_stored_password_is_never_plaintext` | Pass |
+| Password policy and compromised-password rejection | `backend/app/security.py`, `backend/app/schemas.py`; min 12, max 1024, no padding, small common-password deny-list | `test_password_policy_rejects_short_common_and_padded_values`, `test_weak_password_is_rejected_on_create` | Pass |
+| Server-managed sessions | `backend/app/auth.py`; random token hashed with SHA-256 at rest, HttpOnly + SameSite cookie, `COOKIE_SECURE` for HTTPS, 12 h absolute / 30 min idle, rotation on login and password change | `test_login_sets_httponly_cookie_and_returns_no_hash`, `test_expired_session_is_rejected`, `test_idle_session_is_rejected`, `test_password_change_rotates_session_and_audits` | Pass |
+| Session revocation | Logout, user deactivation, role change, explicit owner revoke-all | `test_logout_revokes_session`, `test_deactivation_revokes_all_target_sessions`, `test_role_change_revokes_all_target_sessions`, `test_owner_can_revoke_suspicious_sessions` | Pass |
+| CSRF and origin validation | `backend/app/auth.py`; double-submit token plus explicit `Origin` allowlist on all state-changing routes | `test_state_changes_require_csrf_and_trusted_origin` | Pass |
+| Backend RBAC, deny by default | `backend/app/auth.py` (`ROLE_PERMISSIONS`, `require_permissions`); owner-only user and audit endpoints | `test_protected_endpoints_require_authentication`, `test_staff_cannot_manage_users_or_read_audit`, `test_staff_cannot_promote_self` | Pass |
+| Mass-assignment protection | `backend/app/schemas.py` uses `extra='forbid'`; role/status are never read from a create payload | `test_user_creation_rejects_privilege_fields` | Pass |
+| Last-owner and self-demotion protection | `backend/app/routers/users.py`; only active owners count toward the invariant | `test_last_owner_cannot_demote_or_deactivate_self`, `test_inactive_owner_can_be_demoted_without_tripping_last_owner_guard`, `test_self_demotion_is_blocked` | Pass |
+| Generic authentication errors | `backend/app/routers/auth.py` returns the same 401 for unknown user, wrong password and disabled account | `test_failed_login_is_generic_and_audited`, `test_inactive_user_cannot_log_in` | Pass |
+| Login rate limiting | `backend/app/ratelimit.py`; 5 failures per username per 15 min plus a per-IP ceiling | `test_login_rate_limit_returns_429` | Pass |
+| SQL injection resistance | SQLAlchemy ORM only; no string-built SQL | `test_sql_injection_payload_does_not_authenticate` | Pass |
+| Append-only audit logging | `backend/app/audit.py`, `backend/app/models.py` (`AuditLog`), `backend/app/routers/audit.py`; request IP, user agent, request ID, old/new values, no update/delete routes | `test_failed_login_is_generic_and_audited`, `test_audit_log_is_owner_only_and_read_only`, `test_audit_records_never_contain_passwords` | Pass |
+| CORS restriction | `backend/app/main.py`; explicit `CORS_ORIGINS` allowlist with credentials enabled only for those origins | `test_cors_does_not_allow_arbitrary_origins` | Pass |
+| API hardening | `backend/app/main.py`: 1 MiB body limit, no-store on API, CSP/nosniff/frame/referrer/permission headers, HSTS in production, generic 500 handler, validation errors without submitted values, docs disabled in production | `test_oversized_request_body_is_rejected`, `test_security_headers_are_present`, `test_validation_errors_do_not_echo_secrets`, `test_production_configuration_disables_api_docs` | Pass |
+| Secret-free bootstrap | `backend/scripts/create_owner.py`; owner credentials read only from `SEED_OWNER_*` environment variables, never printed | Manual review + `backend/.env.example` | Verified by review |
+| Dependency currency | `backend/requirements.txt`; FastAPI 0.165.0 / Starlette 1.10.0 after remediating advisories found in 0.115.6 / 0.41.3 | `npm run audit:pip` | No known vulnerabilities |
+
+**Verification executed**
+
+- `npm run test:backend` — **34 passed** (`backend/tests/test_security.py`).
+- `npm run audit:pip` — **No known vulnerabilities found**.
+- `npm run scan:bandit` — clean, no findings.
+- Live `uvicorn` smoke test — `/health` returned `200 {"status":"ok"}` and startup completed without errors.
+- `npm run verify:backend` — passes the full chain above.
+
+**Note on test isolation:** `backend/tests/conftest.py` points `DATABASE_URL` at a temporary SQLite file before app import, drops/recreates tables per test, and clears limiter state. No production or business data is used.
+
+---
+
+## 8. Final security report
+
+### 8.1 Features implemented and verified
+
+Authentication (Argon2id, generic errors, rate limiting, active-user checks), server-managed sessions with idle/absolute expiry and revocation, CSRF plus origin validation, backend RBAC with deny-by-default, strict request schemas, append-only audit records, CORS allowlist, security headers, body-size limits, safe error handling, owner bootstrap without committed secrets, and frontend hygiene from Phase 1.
+
+### 8.2 Files created or modified
+
+- Backend: `backend/__init__.py`, `backend/app/{__init__,config,database,models,security,ratelimit,audit,auth,schemas,main}.py`, `backend/app/routers/{__init__,auth,users,audit}.py`, `backend/scripts/create_owner.py`, `backend/pytest.ini`, `backend/tests/{conftest,test_security}.py`, `backend/requirements.txt`, `backend/requirements-dev.txt`, `backend/.env.example`.
+- Frontend / repo: `SECURITY_ASSESSMENT.md`, `package.json`, `.gitignore`, plus the Phase 1 files listed in section 6.
+
+### 8.3 Security libraries introduced
+
+`fastapi==0.165.0`, `starlette==1.10.0` (transitive), `uvicorn[standard]==0.54.0`, `SQLAlchemy==2.0.36`, `argon2-cffi==23.1.0`, `pydantic==2.10.4`, `pydantic-settings==2.7.0`. Test/scanning: `pytest==8.3.4`, `httpx==0.28.1`, `pip-audit==2.10.1`, `bandit==1.9.4`.
+
+### 8.4 Tests created and executed
+
+- `tests/security.test.js` — 7 frontend security tests.
+- `backend/tests/test_security.py` — 34 backend security tests covering authentication, password security, sessions, RBAC, privilege escalation, IDOR-style user ID manipulation, brute-force protection, SQL injection, CSRF, origin validation, mass assignment, audit integrity, headers, body limits, error leakage and production configuration.
+- Total: **41 automated security tests**, all passing.
+- Backend tests deliberately do not exercise MFA, password reset, business-record IDOR, inventory/financial tampering or backup restoration because those controls do not exist yet.
+
+### 8.5 Vulnerabilities resolved
+
+Plaintext backend credential storage; client-only authentication; client-only authorization; absent CSRF protection; absent login throttling; mutable client-side audit trail; CSV formula injection; open-redirect-like notification navigation; over-broad service worker caching; missing API security headers; submission of unvalidated numeric/date values; hard deletion of expense and production records in the demo; and the Starlette advisories found by `pip-audit`.
+
+### 8.6 Remaining vulnerabilities and explicit gaps
+
+| Gap | Status | Impact |
+|---|---|---|
+| React SPA still uses `localStorage` with plain-text **demo** passwords and is not connected to the new API | **Not implemented** | The largest remaining gap. Backend controls do not protect the current demo UI. Integration is mandatory before real data. |
+| MFA/TOTP, recovery codes, MFA recovery | **Not implemented** | Owner/admin accounts lack a second factor. |
+| Password reset workflow | **Not implemented** | No token-based recovery, rate-limited reset or session invalidation on reset. |
+| PostgreSQL, migrations, least-privilege DB role, connection encryption | **Not implemented** | Default is local SQLite for development only. |
+| Encrypted backups, off-server storage, restore drill | **Not implemented** | No RPO/RTO can be demonstrated. |
+| Object-level authorization and transactional integrity for business records | **Not implemented** | No purchase/sale/expense/inventory API endpoints exist yet. |
+| Shared rate limiter for multi-worker deployments | **Partially implemented** | In-memory limiter is per process; use Redis in production. |
+| HTTPS/TLS termination and trusted-proxy configuration | **Not implemented** | `COOKIE_SECURE` and HSTS must be enabled at the edge. |
+| Audit hash chaining, anomaly alerting, WAF | **Not implemented** | Priority 2 hardening. |
+| 2 moderate React Router advisories | **Open, documented** | Requires a tested breaking upgrade to `react-router-dom@7.18.6`. |
+| Argon2 work-factor benchmarking | **Pending manual step** | Parameters are conservative defaults, not calibrated on target hardware. |
+| Gitleaks and Semgrep scans | **Not executed** | Recommended additional repository scanning. |
+| Independent ASVS Level 2 review and penetration testing | **Not executed** | Required before production release. |
+
+**No production-ready or compliant claim is made.** The application is production-*conscious*, not production-*ready*.
+
+### 8.7 Configuration required for deployment
+
+1. Copy `backend/.env.example` to `backend/.env`; set `DATABASE_URL` to a restricted PostgreSQL account, `CORS_ORIGINS` to the exact frontend origin, `ENVIRONMENT=production`, `COOKIE_SECURE=true`, and a suitable `COOKIE_SAMESITE`.
+2. Benchmark and set Argon2 parameters for the deployment hardware; tune session lifetimes to policy.
+3. Create the first owner with `backend/scripts/create_owner.py` using environment-supplied credentials stored in a secret manager. Never commit `.env`.
+4. Terminate HTTPS at a reverse proxy, redirect HTTP, and ensure the proxy does not strip the security headers or overwrite HSTS.
+5. Only trust `X-Forwarded-For` from the known proxy; otherwise restrict audit IP capture.
+6. Create a dedicated database role without `UPDATE`/`DELETE` on `audit_logs`, and disable public database access.
+7. Configure encrypted daily backups with 14-day/8-week/12-month retention and complete a documented restore test.
+8. Run `npm run verify`, `npm run verify:backend`, Gitleaks and Semgrep in CI before each release.
+
+### 8.8 Controls requiring manual verification
+
+- Real-browser cookie flags (`Secure`, `HttpOnly`, `SameSite`) over HTTPS.
+- Reverse-proxy header behaviour and HSTS preload readiness.
+- Database role privileges and audit-table immutability.
+- Backup restoration and recovery-time measurement.
+- Argon2 calibration and login latency under expected load.
+- Behaviour of the in-memory rate limiter with multiple application workers.
+- Full OWASP ASVS 5.0.0 Level 2 review and authorised penetration testing.
+- MFA, password reset, backup and business-integrity controls once implemented.

@@ -12,3 +12,8 @@ coverage
 *.pfx
 secrets*.json
 credentials*.json
+backend/.venv/
+*.db
+.pytest_cache/
+__pycache__/
+*.pyc

@@ -154,17 +154,33 @@ Data is persisted in `localStorage` under `js-baking-house-v3`. All mutations fl
 
 ---
 
-## Notes for the next implementation phase
+## Backend security API (Phase 2)
 
-This repository currently delivers the complete client-facing application with a browser-persisted data layer, which is ideal for review, acceptance and demonstration. The SRS production stack (React + FastAPI + PostgreSQL, JWT, Argon2/bcrypt, Pytest) maps directly onto the existing module boundaries:
+A FastAPI security foundation now exists under `backend/`. It is **not yet connected to the React UI** — the SPA remains the browser-persisted client review build.
 
-- `src/lib/store.jsx` → REST client / API hooks
-- `src/lib/seed.js` → database migrations and seed scripts
-- Client-side role checks → server-side JWT authorization
-- Browser audit log → database-backed audit tables
+```bash
+# Install backend dependencies (dev + tests + scanners)
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements-dev.txt
+
+# Run the API locally
+ENVIRONMENT=development backend/.venv/bin/python -m uvicorn backend.app.main:app --reload
+
+# Create the first owner (credentials come only from the environment)
+cp backend/.env.example backend/.env      # then edit it, never commit it
+SEED_OWNER_USERNAME=... SEED_OWNER_PASSWORD=... \
+  backend/.venv/bin/python backend/scripts/create_owner.py
+
+# Verify
+npm run verify:backend
+```
+
+The API exposes `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/change-password`, `GET /api/v1/auth/me`, owner-only user management under `/api/v1/users`, a read-only `/api/v1/audit`, and `/health`. Authentication uses Argon2id hashes and server-managed HttpOnly cookies with double-submit CSRF tokens; there is no JWT and no credential in `localStorage` on the backend side.
+
+See `SECURITY_ASSESSMENT.md` for the full audit, implementation record, test results, remaining gaps and deployment configuration. **This is not a production-ready system**; MFA, PostgreSQL, backup/restore, business-record authorization and SPA integration are still outstanding.
 
 The visual identity is built with typography, colour and inline icons. Small PNG icons in `public/` are used only for PWA installation and device notifications.
 
 ---
 
-**Version:** 1.0 · **Default currency:** KES · **Status:** Client review build
+**Version:** 1.0 · **Default currency:** KES · **Status:** Client review build + backend security foundation
