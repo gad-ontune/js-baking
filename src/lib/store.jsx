@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { createSeedData } from './seed'
 import { uid } from './format'
+import { SESSION_IDLE_MS } from './security'
 
 const STORAGE_KEY = 'js-baking-house-v3'
 const StoreContext = createContext(null)
@@ -28,7 +29,17 @@ function loadInitialData() {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
       const parsed = JSON.parse(stored)
-      if (parsed?.inventory && parsed?.sales && parsed?.business) return parsed
+      if (parsed?.inventory && parsed?.sales && parsed?.business) {
+        // Expire stale demo sessions on load. Production sessions must be
+        // enforced by the backend, not by browser state.
+        const lastActive = Number(parsed.sessionLastActive || 0)
+        if (parsed.sessionUserId && (!lastActive || Date.now() - lastActive > SESSION_IDLE_MS)) {
+          parsed.sessionUserId = null
+          parsed.sessionLastActive = null
+        }
+        if (!Array.isArray(parsed.auditLogs)) parsed.auditLogs = []
+        return parsed
+      }
     }
   } catch {
     // Fall back to a fresh seeded demo when storage is unavailable or corrupt.
@@ -65,6 +76,7 @@ export function StoreProvider({ children }) {
     setData((previous) => {
       const draft = structuredClone(previous)
       recipe(draft)
+      if (draft.sessionUserId) draft.sessionLastActive = Date.now()
       return draft
     })
   }, [])
@@ -84,7 +96,7 @@ export function StoreProvider({ children }) {
   )
 
   const currentUser = useMemo(
-    () => data.users.find((user) => user.id === data.sessionUserId) || null,
+    () => data.users.find((user) => user.id === data.sessionUserId && user.active) || null,
     [data.users, data.sessionUserId],
   )
 
@@ -99,15 +111,32 @@ export function StoreProvider({ children }) {
 
   const signIn = useCallback(
     (username, password) => {
+      const normalized = String(username || '').trim().toLowerCase()
       const user = data.users.find(
         (candidate) =>
-          candidate.username.toLowerCase() === username.trim().toLowerCase() &&
+          String(candidate.username || '').toLowerCase() === normalized &&
           candidate.password === password &&
           candidate.active,
       )
-      if (!user) return { ok: false, message: 'Incorrect username or password.' }
+
+      if (!user) {
+        // Never reveal which part of the credentials was wrong.
+        mutate((draft) => {
+          draft.auditLogs.unshift({
+            id: uid('audit'),
+            action: 'LOGIN_FAILED',
+            entity: 'Authentication',
+            details: 'Failed sign-in attempt',
+            userId: null,
+            date: new Date().toISOString(),
+          })
+        })
+        return { ok: false, message: 'Incorrect username or password.' }
+      }
+
       mutate((draft) => {
         draft.sessionUserId = user.id
+        draft.sessionLastActive = Date.now()
         draft.auditLogs.unshift({
           id: uid('audit'),
           action: 'USER_LOGIN',
@@ -133,13 +162,29 @@ export function StoreProvider({ children }) {
         date: new Date().toISOString(),
       })
       draft.sessionUserId = null
+      draft.sessionLastActive = null
     })
   }, [currentUser, mutate])
 
+  const touchSession = useCallback(() => {
+    setData((previous) =>
+      previous.sessionUserId ? { ...previous, sessionLastActive: Date.now() } : previous,
+    )
+  }, [])
+
   const resetDemo = useCallback(() => {
-    setData(createSeedData())
+    const fresh = createSeedData()
+    fresh.auditLogs.unshift({
+      id: uid('audit'),
+      action: 'DEMO_RESET',
+      entity: 'Application',
+      details: 'Demo data restored to seeded state',
+      userId: currentUser?.id || null,
+      date: new Date().toISOString(),
+    })
+    setData(fresh)
     notify('Demo data restored to its original state.')
-  }, [notify])
+  }, [currentUser, notify])
 
   const value = useMemo(
     () => ({
@@ -153,9 +198,10 @@ export function StoreProvider({ children }) {
       can,
       signIn,
       signOut,
+      touchSession,
       resetDemo,
     }),
-    [data, mutate, addAudit, notify, toasts, dismissToast, currentUser, can, signIn, signOut, resetDemo],
+    [data, mutate, addAudit, notify, toasts, dismissToast, currentUser, can, signIn, signOut, touchSession, resetDemo],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

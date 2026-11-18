@@ -1,6 +1,10 @@
-const SEEN_KEY = 'js-baking-house-seen-alerts'
+import { safeAbsoluteInternalUrl } from './security'
 
-/** Notification API availability varies by browser and by secure context. */
+const ICON = '/icon-192.png'
+const BADGE = '/badge-96.png'
+let registrationPromise = null
+
+/** Notifications require a secure context (HTTPS or localhost) on most devices. */
 export function notificationsSupported() {
   return typeof window !== 'undefined' && 'Notification' in window
 }
@@ -9,47 +13,59 @@ export function notificationPermission() {
   return notificationsSupported() ? Notification.permission : 'unsupported'
 }
 
-/** Must be called from a user gesture (e.g. the Enable button) to be allowed. */
+/** Register once so notifications can be shown even when the tab is backgrounded. */
+export function registerServiceWorker() {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return Promise.resolve(null)
+  if (!registrationPromise) {
+    registrationPromise = navigator.serviceWorker
+      .register('/sw.js')
+      .catch(() => null)
+  }
+  return registrationPromise
+}
+
+/** Must be called from a user gesture (for example an Enable button). */
 export async function requestNotificationPermission() {
   if (!notificationsSupported()) return 'unsupported'
+  await registerServiceWorker()
+
   if (Notification.permission !== 'default') return Notification.permission
+
   try {
-    return await Notification.requestPermission()
+    return await new Promise((resolve) => {
+      const result = Notification.requestPermission(resolve)
+      if (result && typeof result.then === 'function') result.then(resolve).catch(() => resolve('denied'))
+    })
   } catch {
     return 'denied'
   }
 }
 
-export function alertKey(alert) {
-  return `${alert.id}:${alert.status}`
-}
-
-export function readSeenAlerts() {
-  try {
-    const raw = localStorage.getItem(SEEN_KEY)
-    const parsed = raw ? JSON.parse(raw) : null
-    return Array.isArray(parsed) ? new Set(parsed) : null
-  } catch {
-    return null
-  }
-}
-
-export function writeSeenAlerts(keys) {
-  try {
-    localStorage.setItem(SEEN_KEY, JSON.stringify([...keys]))
-  } catch {
-    // Storage may be disabled; notifications still work for the current session.
-  }
-}
-
-export function fireDeviceNotification({ title, body, tag, onClick }) {
+/**
+ * Prefer the service worker so alerts reach the device notification centre,
+ * including from a background tab. Fall back to the browser Notification API.
+ */
+export async function fireDeviceNotification({ title, body, tag, url = '/notifications', onClick }) {
   if (!notificationsSupported() || Notification.permission !== 'granted') return
 
+  const target = safeAbsoluteInternalUrl(url, window.location.origin) || new URL('/notifications', window.location.origin).href
   const options = {
     body,
     tag,
-    icon: '/favicon.svg',
-    badge: '/favicon.svg',
+    icon: ICON,
+    badge: BADGE,
+    data: { url: target },
+    actions: [{ action: 'open', title: 'Open notification centre' }],
+  }
+
+  const registration = await registerServiceWorker()
+  if (registration?.showNotification) {
+    try {
+      await registration.showNotification(title, options)
+      return
+    } catch {
+      // Fall through to the legacy API below.
+    }
   }
 
   try {
@@ -61,16 +77,16 @@ export function fireDeviceNotification({ title, body, tag, onClick }) {
         notification.close()
       }
     }
-    return
   } catch {
-    // Some browsers (notably Android Chrome) only allow notifications via a service worker.
+    // Notifications are best-effort; the in-app inbox remains available.
   }
+}
 
-  try {
-    navigator.serviceWorker?.getRegistration().then((registration) => {
-      registration?.showNotification?.(title, options)
-    })
-  } catch {
-    // Notifications are best-effort; the in-app alerts remain available.
-  }
+export function sendTestDeviceNotification(businessName = 'JS Baking House') {
+  return fireDeviceNotification({
+    title: `Test notification — ${businessName}`,
+    body: 'Device notifications are working. Open the notification centre to review your alerts.',
+    tag: `test-${Date.now()}`,
+    url: '/notifications',
+  })
 }

@@ -202,15 +202,15 @@ export function Modal({ open, onClose, title, description, children, footer, siz
         className={`animate-fade-in flex max-h-[94vh] w-full ${widths[size]} flex-col overflow-hidden rounded-t-2xl bg-white shadow-lift sm:rounded-2xl`}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-line px-6 py-5">
+        <div className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:px-6 sm:py-5">
           <div>
             <h2 className="font-display text-xl font-semibold text-ink">{title}</h2>
             {description && <p className="mt-1 text-sm text-muted">{description}</p>}
           </div>
           <IconButton icon={X} label="Close" onClick={onClose} />
         </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
-        {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line bg-[#FCFAF7] px-6 py-4">{footer}</div>}
+        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">{children}</div>
+        {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line bg-[#FCFAF7] px-4 py-4 sm:px-6">{footer}</div>}
       </div>
     </div>
   )
@@ -253,10 +253,10 @@ export function PeriodPicker({ period, onPeriodChange, custom, onCustomChange, s
         {showCustom && <option value="custom">Custom range</option>}
       </Select>
       {period === 'custom' && (
-        <div className="flex items-center gap-2">
-          <input type="date" className="input w-auto py-2" value={custom.from} onChange={(event) => onCustomChange({ ...custom, from: event.target.value })} />
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <input type="date" className="input min-w-0 flex-1 py-2 sm:w-auto sm:flex-none" value={custom.from} onChange={(event) => onCustomChange({ ...custom, from: event.target.value })} />
           <span className="text-muted">to</span>
-          <input type="date" className="input w-auto py-2" value={custom.to} onChange={(event) => onCustomChange({ ...custom, to: event.target.value })} />
+          <input type="date" className="input min-w-0 flex-1 py-2 sm:w-auto sm:flex-none" value={custom.to} onChange={(event) => onCustomChange({ ...custom, to: event.target.value })} />
         </div>
       )}
     </div>

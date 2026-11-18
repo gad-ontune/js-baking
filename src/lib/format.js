@@ -145,11 +145,19 @@ export const statusLabel = {
   archived: 'Archived',
 }
 
+/** Neutralise spreadsheet formula injection and control characters in CSV cells. */
+export const csvCell = (value) => {
+  let raw = String(value ?? '').replace(/\r|\n|\t/g, ' ')
+  while (raw.length && raw.charCodeAt(0) < 32) raw = raw.slice(1)
+  const formulaLike = /^[=+@]/.test(raw) || (/^-/.test(raw) && !/^-?\d+(\.\d+)?$/.test(raw))
+  const safe = formulaLike ? `'${raw}` : raw
+  return `"${safe.replace(/"/g, '""')}"`
+}
+
 export const downloadCSV = (filename, rows) => {
   if (!rows?.length) return
   const headers = Object.keys(rows[0])
-  const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const content = [headers.join(','), ...rows.map((r) => headers.map((h) => escape(r[h])).join(','))].join('\n')
+  const content = [headers.map(csvCell).join(','), ...rows.map((r) => headers.map((h) => csvCell(r[h])).join(','))].join('\n')
   const blob = new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

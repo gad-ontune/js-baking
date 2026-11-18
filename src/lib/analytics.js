@@ -249,7 +249,7 @@ export function supplierBalances(data) {
 }
 
 export function productionSummary(data, range) {
-  const records = data.production.filter((record) => inRange(record.date, range))
+  const records = data.production.filter((record) => !record.reversed && inRange(record.date, range))
   const byProduct = new Map()
   records.forEach((record) => {
     const entry = byProduct.get(record.productName) || { name: record.productName, quantity: 0, records: 0 }

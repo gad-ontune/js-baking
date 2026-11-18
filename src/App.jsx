@@ -14,6 +14,7 @@ import SupplierBalances from './pages/purchases/SupplierBalances'
 import Production from './pages/production/Production'
 import Sales from './pages/sales/Sales'
 import Expenses from './pages/sales/Expenses'
+import Notifications from './pages/Notifications'
 import FinancialReport from './pages/reports/FinancialReport'
 import InventoryReport from './pages/reports/InventoryReport'
 import PurchaseReport from './pages/reports/PurchaseReport'
@@ -71,6 +72,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={guard('dashboard.view', <Dashboard />)} />
+        <Route path="notifications" element={<Notifications />} />
 
         <Route path="inventory" element={guard('inventory.view', <Inventory />)} />
         <Route path="inventory/categories" element={guard('inventory.view', <InventoryCategories />)} />

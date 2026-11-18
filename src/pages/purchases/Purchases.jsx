@@ -3,6 +3,7 @@ import { Banknote, Eye, FilePlus2, PackagePlus, Plus, Receipt, RotateCcw, Search
 import { useStore } from '../../lib/store'
 import { expensesByCategory } from '../../lib/analytics'
 import { formatDate, inRange, money, number, periodRange, uid } from '../../lib/format'
+import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import {
   Badge,
   Button,
@@ -45,6 +46,11 @@ function PurchaseForm({ data, onClose, onSave }) {
 
   const submit = () => {
     if (!form.supplierId) return setError('Choose a supplier.')
+    if (!isValidDateValue(form.date)) return setError('Enter a valid purchase date.')
+    if (!isFiniteNumber(form.discount) || !isFiniteNumber(form.charges)) return setError('Enter valid discount and charge amounts.')
+    if (!form.lines.every((line) => isFiniteNumber(line.quantity) && isFiniteNumber(line.unitCost))) {
+      return setError('Enter a valid quantity and cost for every purchase line.')
+    }
     const validLines = form.lines.filter((line) => line.itemId && Number(line.quantity) > 0)
     if (!validLines.length) return setError('Add at least one purchased item.')
     if (validLines.some((line) => Number(line.unitCost) < 0)) return setError('Unit costs cannot be negative.')

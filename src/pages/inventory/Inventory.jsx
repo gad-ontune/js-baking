@@ -17,6 +17,7 @@ import {
 import { useStore } from '../../lib/store'
 import { inventorySummary, salesByProduct } from '../../lib/analytics'
 import { compactMoney, formatDate, itemStatus, money, number, statusLabel, uid } from '../../lib/format'
+import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import {
   Badge,
   Button,
@@ -55,9 +56,11 @@ function ItemForm({ item, config, onSave, onClose }) {
   const submit = (event) => {
     event.preventDefault()
     if (!form.name.trim()) return setError('Item name is required.')
-    if (Number(form.quantity) < 0) return setError('Quantity cannot be negative.')
-    if (Number(form.minQuantity) < 0) return setError('Minimum threshold cannot be negative.')
-    if (Number(form.purchaseCost) < 0) return setError('Purchase cost cannot be negative.')
+    if (!isFiniteNumber(form.quantity) || Number(form.quantity) < 0) return setError('Enter a valid quantity.')
+    if (!isFiniteNumber(form.minQuantity) || Number(form.minQuantity) < 0) return setError('Enter a valid minimum threshold.')
+    if (!isFiniteNumber(form.purchaseCost) || Number(form.purchaseCost) < 0) return setError('Enter a valid purchase cost.')
+    if (form.expiryDate && !isValidDateValue(form.expiryDate)) return setError('Enter a valid expiry date.')
+    if (form.sellingPrice !== '' && !isFiniteNumber(form.sellingPrice)) return setError('Enter a valid selling price.')
     onSave({
       ...form,
       name: form.name.trim(),
@@ -132,6 +135,7 @@ function MovementDialog({ item, onClose }) {
   const submit = () => {
     const amount = Number(quantity)
     if (!Number.isFinite(amount) || amount < 0) return setError('Enter a valid quantity.')
+    if (type === 'Adjustment' && !reason.trim()) return setError('A reason is required for stock adjustments.')
     let delta = amount
     if (type === 'Adjustment') delta = amount - item.quantity
     else if (type !== 'Purchase') delta = -amount

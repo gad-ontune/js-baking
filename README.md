@@ -42,7 +42,7 @@ npm run preview
 - Sales performance and revenue-vs-expenses charts
 - Inventory distribution and best-selling product charts
 - Low-stock, expiry and unusually-high-expense alerts
-- Optional device notifications for new low-stock and expiry alerts (enable from the bell menu)
+- Dynamic notification centre with unread tracking, filters and device delivery
 - Chronological recent activity across purchases, sales, expenses, stock changes and production
 
 ### 2. Inventory management
@@ -96,15 +96,24 @@ The interface uses a warm neutral canvas, deep charcoal text, bakery-brown accen
 
 The shell is fully responsive: a collapsible sidebar on desktop and a slide-out drawer on small screens. Reports include dedicated print styling.
 
-### Device notifications
+### Notification centre and device notifications
 
-New low-stock, out-of-stock and expiry alerts can also be delivered through the browser's native notification system:
+The bell menu and the dedicated **Notifications** page share one live inbox:
 
-1. Open the bell menu in the top bar.
-2. Click **Enable notifications** and allow access when the browser asks.
-3. From then on, each *new* alert appears on the device as well as in the bell menu; clicking it opens the relevant inventory page.
+- Open alerts are synchronised from inventory data whenever stock or expiry status changes.
+- Each notification has a read/unread state, severity, timestamp and related page.
+- Use **Mark all as read**, per-item read/unread toggles, dismiss, clear-read and clear-all actions.
+- Filter by All / Unread / Read / Resolved and by severity, or search the inbox.
+- Send a **Test** notification to confirm delivery before relying on stock alerts.
 
-The first load records the existing alerts as a baseline, so enabling notifications does not produce a burst of old alerts. Reopening the app, recording a sale or adjusting stock will not repeat an alert that is already open. If permission is denied, the bell menu shows instructions to re-enable it in browser settings. Desktop notifications require a secure context (`localhost` or HTTPS).
+Device delivery uses the built-in Notification API through a registered service worker, so new alerts can appear in the device notification centre even when the app tab is in the background. Clicking a device notification opens the relevant page (or the notification centre).
+
+1. Open the bell menu or the Notifications page.
+2. Click **Enable device alerts** and allow access when prompted.
+3. Optionally install the app to the device home screen from the browser menu for an app-like experience.
+4. Click **Send test** to confirm that a notification arrives on the device.
+
+The first sync seeds existing demo alerts into the inbox without sending a burst of old alerts to the device. Only genuinely new alerts are delivered. Device notifications require a secure context (`localhost` or HTTPS); if permission is denied, the in-app inbox continues to work and the UI explains how to re-enable it.
 
 ---
 
@@ -113,8 +122,9 @@ The first load records the existing alerts as a baseline, so enabling notificati
 ```text
 src/
   components/       Reusable UI, app shell, report shell
-  lib/              Seed data, analytics, formatting and persistence store
+  lib/              Seed data, analytics, formatting, notifications and persistence store
   pages/
+    Notifications.jsx  Dedicated notification centre
     inventory/
     purchases/
     production/
@@ -153,7 +163,7 @@ This repository currently delivers the complete client-facing application with a
 - Client-side role checks → server-side JWT authorization
 - Browser audit log → database-backed audit tables
 
-No image assets are required; the visual identity is built with typography, colour and inline icons.
+The visual identity is built with typography, colour and inline icons. Small PNG icons in `public/` are used only for PWA installation and device notifications.
 
 ---
 

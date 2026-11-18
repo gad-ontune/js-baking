@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Building2, MapPin, Phone, RotateCcw, Save, Store } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { formatDate } from '../../lib/format'
+import { isFiniteNumber, isValidEmail } from '../../lib/security'
 import { Button, Card, ConfirmDialog, Field, PageHeader, SectionHeading } from '../../components/ui'
 
 export default function BusinessProfile() {
@@ -12,6 +13,10 @@ export default function BusinessProfile() {
 
   const save = () => {
     if (!form.name.trim()) return notify('Business name is required.', 'error')
+    if (!isValidEmail(form.email)) return notify('Enter a valid email address.', 'error')
+    if (!isFiniteNumber(form.expiryWarningDays) || form.expiryWarningDays < 1 || form.expiryWarningDays > 365) {
+      return notify('Expiry warning period must be between 1 and 365 days.', 'error')
+    }
     mutate((draft) => {
       draft.business = { ...form, name: form.name.trim() }
       addAudit(draft, 'SETTINGS_UPDATED', 'Business profile', 'Business information updated')

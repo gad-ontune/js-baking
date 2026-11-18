@@ -33,21 +33,24 @@ import {
 import { useStore } from '../lib/store'
 import { inventoryAlerts, periodLabel } from '../lib/analytics'
 import { formatDate } from '../lib/format'
+import { safeInternalPath } from '../lib/security'
+import { useNotifications } from '../lib/notificationCenter'
 import {
-  alertKey,
   fireDeviceNotification,
   notificationPermission,
   notificationsSupported,
-  readSeenAlerts,
   requestNotificationPermission,
-  writeSeenAlerts,
+  sendTestDeviceNotification,
 } from '../lib/deviceNotifications'
 import { Avatar, Badge, Button } from './ui'
 
 const NAV_GROUPS = [
   {
     label: 'Overview',
-    items: [{ to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'dashboard.view' }],
+    items: [
+      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'dashboard.view' },
+      { to: '/notifications', label: 'Notifications', icon: Bell, permission: 'dashboard.view' },
+    ],
   },
   {
     label: 'Inventory',
@@ -98,6 +101,7 @@ const NAV_GROUPS = [
 
 const ROUTE_TITLES = {
   '/dashboard': 'Dashboard',
+  '/notifications': 'Notification Centre',
   '/inventory': 'All Items',
   '/inventory/categories': 'Inventory Categories',
   '/inventory/movements': 'Stock Movements',
@@ -120,7 +124,7 @@ const ROUTE_TITLES = {
   '/settings/audit': 'Audit History',
 }
 
-function Sidebar({ collapsed, onToggle, onNavigate }) {
+function Sidebar({ collapsed, onToggle, onNavigate, mobile = false, onClose }) {
   const { can, data } = useStore()
 
   return (
@@ -135,11 +139,15 @@ function Sidebar({ collapsed, onToggle, onNavigate }) {
             </span>
           )}
         </NavLink>
-        {!collapsed && (
+        {!collapsed && (mobile ? (
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted hover:bg-bakery-50 hover:text-ink" aria-label="Close menu">
+            <X size={18} />
+          </button>
+        ) : (
           <button type="button" onClick={onToggle} className="rounded-lg p-1.5 text-muted hover:bg-bakery-50 hover:text-ink" aria-label="Collapse sidebar">
             <ChevronLeft size={18} />
           </button>
-        )}
+        ))}
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-5">
@@ -192,23 +200,51 @@ function Sidebar({ collapsed, onToggle, onNavigate }) {
 }
 
 function NotificationsPanel({ onClose }) {
-  const { data } = useStore()
-  const alerts = useMemo(() => inventoryAlerts(data), [data])
+  const { data, notify } = useStore()
+  const { active, unreadCount, criticalCount, markAllRead, markRead, addNotification } = useNotifications()
   const navigate = useNavigate()
   const [permission, setPermission] = useState(notificationPermission)
   const [requesting, setRequesting] = useState(false)
 
   const enable = async () => {
     setRequesting(true)
-    setPermission(await requestNotificationPermission())
+    const result = await requestNotificationPermission()
+    setPermission(result)
     setRequesting(false)
+    notify(
+      result === 'granted' ? 'Device notifications enabled.' : 'Notification permission was not granted.',
+      result === 'granted' ? 'success' : 'error',
+    )
+  }
+
+  const test = async () => {
+    addNotification({
+      title: 'Test notification',
+      detail: 'Your notification centre is working. Device alerts open this page when clicked.',
+      severity: 'info',
+      type: 'system',
+    })
+    if (permission === 'granted') await sendTestDeviceNotification(data.business.name)
+    notify('Test notification added to your inbox.')
+  }
+
+  const open = (item) => {
+    if (!item.read) markRead(item.id)
+    const destination = safeInternalPath(item.to, window.location.origin)
+    if (destination) navigate(destination)
+    onClose()
   }
 
   return (
     <div className="absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-line bg-white p-2 shadow-lift">
-      <div className="flex items-center justify-between px-3 py-2">
-        <p className="font-display text-base font-semibold">Alerts</p>
-        <Badge tone={alerts.length ? 'red' : 'leaf'}>{alerts.length} open</Badge>
+      <div className="flex items-center justify-between gap-2 px-3 py-2">
+        <p className="font-display text-base font-semibold">Notifications</p>
+        <div className="flex items-center gap-1.5">
+          <Badge tone={unreadCount ? 'red' : criticalCount ? 'amber' : 'leaf'}>{unreadCount ? `${unreadCount} unread` : 'All read'}</Badge>
+          <button type="button" onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-bakery-50" aria-label="Close notifications">
+            <X size={15} />
+          </button>
+        </div>
       </div>
 
       {notificationsSupported() ? (
@@ -216,54 +252,64 @@ function NotificationsPanel({ onClose }) {
           <div className="flex items-center gap-2">
             <BellRing size={14} className="text-bakery-700" />
             <p className="text-xs font-bold text-bakery-900">
-              {permission === 'granted' ? 'Desktop notifications on' : permission === 'denied' ? 'Desktop notifications blocked' : 'Get desktop notifications'}
+              {permission === 'granted' ? 'Device notifications on' : permission === 'denied' ? 'Device notifications blocked' : 'Get device notifications'}
             </p>
           </div>
           <p className="mt-1 text-[11px] leading-relaxed text-bakery-800/80">
             {permission === 'granted'
-              ? 'New low-stock and expiry alerts will also appear on this device.'
+              ? 'New stock alerts also appear in your device notification centre, even when this tab is in the background.'
               : permission === 'denied'
-                ? 'Allow notifications for this site in your browser settings to receive alerts on this device.'
-                : 'Turn this on to see new stock alerts even when the app is in the background.'}
+                ? 'Allow notifications for this site in your browser or device settings. In-app alerts still work.'
+                : 'Turn this on to receive new stock alerts on this device.'}
           </p>
-          {permission === 'default' && (
-            <Button size="sm" variant="primary" icon={BellRing} className="mt-2 w-full" onClick={enable} disabled={requesting}>
-              {requesting ? 'Waiting for permission…' : 'Enable notifications'}
-            </Button>
-          )}
+          <div className="mt-2 flex gap-2">
+            {permission === 'default' && (
+              <Button size="sm" variant="primary" icon={BellRing} className="flex-1" onClick={enable} disabled={requesting}>
+                {requesting ? 'Waiting…' : 'Enable'}
+              </Button>
+            )}
+            {permission === 'granted' && <Button size="sm" className="flex-1" icon={BellRing} onClick={test}>Test alert</Button>}
+          </div>
         </div>
       ) : (
         <p className="mx-1 mb-2 rounded-xl bg-slate-50 p-3 text-[11px] text-muted">
-          This browser does not support desktop notifications. In-app alerts still work.
+          This browser does not support system notifications. In-app alerts still work.
         </p>
       )}
 
+      <div className="mb-1 flex items-center justify-between gap-2 px-3 py-1">
+        <button type="button" onClick={() => { navigate('/notifications'); onClose() }} className="text-xs font-bold text-bakery-700 hover:underline">
+          View all
+        </button>
+        <button type="button" onClick={markAllRead} disabled={!unreadCount} className="text-xs font-semibold text-muted hover:text-ink disabled:opacity-40">
+          Mark all as read
+        </button>
+      </div>
+
       <div className="max-h-72 overflow-y-auto">
-        {alerts.slice(0, 6).map((alert) => (
+        {active.slice(0, 6).map((item) => (
           <button
-            key={alert.id}
+            key={item.id}
             type="button"
-            onClick={() => {
-              navigate(alert.status === 'expiring' || alert.status === 'expired' ? '/inventory/expiry' : '/inventory/low-stock')
-              onClose()
-            }}
-            className="flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-bakery-50"
+            onClick={() => open(item)}
+            className={`flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-bakery-50 ${item.read ? '' : 'bg-bakery-50/60'}`}
           >
-            <span className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${alert.severity === 'critical' ? 'bg-red-500' : 'bg-amber-500'}`} />
-            <span>
-              <span className="block text-sm font-semibold text-ink">{alert.title}</span>
-              <span className="block text-xs text-muted">{alert.detail}</span>
+            <span className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${item.severity === 'critical' ? 'bg-red-500' : item.severity === 'warning' ? 'bg-amber-500' : 'bg-bakery-500'}`} />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-ink">{item.title}</span>
+              <span className="block truncate text-xs text-muted">{item.detail}</span>
             </span>
           </button>
         ))}
-        {!alerts.length && <p className="px-3 py-6 text-center text-sm text-muted">No stock alerts right now.</p>}
+        {!active.length && <p className="px-3 py-6 text-center text-sm text-muted">No notifications right now.</p>}
       </div>
     </div>
   )
 }
 
 export default function Layout() {
-  const { data, currentUser, signOut } = useStore()
+  const { data, currentUser, signOut, touchSession } = useStore()
+  const { unreadCount, syncAlerts } = useNotifications()
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
@@ -272,46 +318,42 @@ export default function Layout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [query, setQuery] = useState('')
   const alerts = useMemo(() => inventoryAlerts(data), [data])
-  const seenAlertsRef = useRef(null)
+  const firstSyncRef = useRef(false)
 
-  // Fire a device notification only for alerts that did not exist before. The
-  // first load establishes a baseline so the seeded demo alerts don't all fire.
+  // Keep the inbox in step with live inventory alerts. The first sync seeds the
+  // inbox without sending every demo alert to the device notification centre.
   useEffect(() => {
-    const currentKeys = alerts.map(alertKey)
-    const currentSet = new Set(currentKeys)
-
-    if (seenAlertsRef.current === null) {
-      seenAlertsRef.current = readSeenAlerts() || new Set(currentKeys)
+    const fresh = syncAlerts(alerts)
+    if (!firstSyncRef.current) {
+      firstSyncRef.current = true
+      return
     }
-    const seen = seenAlertsRef.current
-    const fresh = alerts.filter((alert) => !seen.has(alertKey(alert)))
+    if (!fresh.length) return
 
-    if (fresh.length) {
-      const destinationFor = (alert) =>
-        alert.status === 'expiring' || alert.status === 'expired' ? '/inventory/expiry' : '/inventory/low-stock'
-
-      fresh.slice(0, 3).forEach((alert) => {
-        fireDeviceNotification({
-          title: `${alert.title} — ${data.business.name}`,
-          body: alert.detail,
-          tag: `alert-${alertKey(alert)}`,
-          onClick: () => navigate(destinationFor(alert)),
-        })
+    fresh.slice(0, 3).forEach((item) => {
+      fireDeviceNotification({
+        title: `${item.title} — ${data.business.name}`,
+        body: item.detail,
+        tag: `alert-${item.id}`,
+        url: item.to,
       })
-      if (fresh.length > 3) {
-        fireDeviceNotification({
-          title: `${fresh.length - 3} more alerts — ${data.business.name}`,
-          body: 'Open the bakery app to review all open alerts.',
-          tag: 'alerts-summary',
-          onClick: () => navigate('/inventory/low-stock'),
-        })
-      }
-      fresh.forEach((alert) => seen.add(alertKey(alert)))
+    })
+    if (fresh.length > 3) {
+      fireDeviceNotification({
+        title: `${fresh.length - 3} more alerts — ${data.business.name}`,
+        body: 'Open the notification centre to review all open alerts.',
+        tag: 'alerts-summary',
+        url: '/notifications',
+      })
     }
+  }, [alerts, data.business.name, syncAlerts])
 
-    ;[...seen].forEach((key) => { if (!currentSet.has(key)) seen.delete(key) })
-    writeSeenAlerts(seen)
-  }, [alerts, data.business.name, navigate])
+  useEffect(() => {
+    setNotificationsOpen(false)
+    setUserMenuOpen(false)
+    setMobileOpen(false)
+    touchSession()
+  }, [location.pathname, touchSession])
 
   const title = ROUTE_TITLES[location.pathname] || 'Dashboard'
   const period = periodLabel('30d')
@@ -338,12 +380,9 @@ export default function Layout() {
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <button type="button" aria-label="Close menu" className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
-          <div className="animate-slide-in absolute inset-y-0 left-0 w-[280px]">
-            <Sidebar collapsed={false} onToggle={() => {}} onNavigate={() => setMobileOpen(false)} />
+          <div className="animate-slide-in absolute inset-y-0 left-0 w-[min(280px,86vw)]">
+            <Sidebar collapsed={false} mobile onClose={() => setMobileOpen(false)} onNavigate={() => setMobileOpen(false)} />
           </div>
-          <button type="button" onClick={() => setMobileOpen(false)} className="absolute left-[292px] top-4 rounded-lg bg-white p-2 shadow" aria-label="Close">
-            <X size={18} />
-          </button>
         </div>
       )}
 
@@ -352,9 +391,9 @@ export default function Layout() {
           <button type="button" onClick={() => setMobileOpen(true)} className="rounded-xl border border-line bg-white p-2 text-ink lg:hidden" aria-label="Open menu">
             <Menu size={19} />
           </button>
-          <div className="hidden min-w-0 md:block">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">{period}</p>
-            <h1 className="truncate font-display text-xl font-semibold text-ink">{title}</h1>
+          <div className="min-w-0">
+            <p className="hidden text-[11px] font-semibold uppercase tracking-wider text-muted sm:block">{period}</p>
+            <h1 className="max-w-[110px] truncate font-display text-sm font-semibold text-ink sm:max-w-sm md:text-xl">{title}</h1>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <form onSubmit={handleSearch} className="relative hidden sm:block">
@@ -374,7 +413,7 @@ export default function Layout() {
                 aria-label="Notifications"
               >
                 <Bell size={18} />
-                {alerts.length > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{alerts.length}</span>}
+                {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{unreadCount > 9 ? '9+' : unreadCount}</span>}
               </button>
               {notificationsOpen && <NotificationsPanel onClose={() => setNotificationsOpen(false)} />}
             </div>

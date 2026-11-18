@@ -7,28 +7,43 @@ import { Button, Field } from '../components/ui'
 export default function Login() {
   const { currentUser, signIn, notify, data } = useStore()
   const navigate = useNavigate()
-  const [username, setUsername] = useState('amina')
-  const [password, setPassword] = useState('owner123')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [failedAttempts, setFailedAttempts] = useState(0)
+  const [lockedUntil, setLockedUntil] = useState(0)
 
   if (currentUser) return <Navigate to="/dashboard" replace />
 
+  const locked = Date.now() < lockedUntil
+
   const handleSubmit = (event) => {
     event.preventDefault()
+    if (locked) return
     setError('')
     setLoading(true)
+    const delay = Math.min(350 * 2 ** failedAttempts, 5000)
     window.setTimeout(() => {
       const result = signIn(username, password)
       setLoading(false)
       if (!result.ok) {
-        setError(result.message)
+        const attempts = failedAttempts + 1
+        setFailedAttempts(attempts)
+        if (attempts >= 5) {
+          setLockedUntil(Date.now() + 30_000)
+          setError('Too many failed attempts. Try again shortly.')
+        } else {
+          setError(result.message)
+        }
         notify(result.message, 'error')
         return
       }
+      setFailedAttempts(0)
+      setLockedUntil(0)
       notify(`Welcome back, ${result.user.name.split(' ')[0]}!`)
       navigate('/dashboard')
-    }, 350)
+    }, delay)
   }
 
   const fillDemo = (user, pass) => {
@@ -122,9 +137,9 @@ export default function Login() {
 
             {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-            <Button type="submit" variant="primary" className="w-full py-3" disabled={loading}>
-              {loading ? 'Signing in…' : 'Sign in'}
-              {!loading && <ArrowRight size={16} />}
+            <Button type="submit" variant="primary" className="w-full py-3" disabled={loading || locked}>
+              {locked ? 'Temporarily locked' : loading ? 'Signing in…' : 'Sign in'}
+              {!loading && !locked && <ArrowRight size={16} />}
             </Button>
           </form>
 

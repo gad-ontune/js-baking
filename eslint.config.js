@@ -45,4 +45,16 @@ export default [
       'react-refresh/only-export-components': 'off',
     },
   },
+  {
+    files: ['public/sw.js'],
+    languageOptions: {
+      globals: {
+        self: 'readonly',
+        caches: 'readonly',
+        fetch: 'readonly',
+        Response: 'readonly',
+        URL: 'readonly',
+      },
+    },
+  },
 ]

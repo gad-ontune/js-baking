@@ -3,6 +3,7 @@ import { Banknote, Eye, Plus, ReceiptText, RotateCcw, Search, ShoppingBag } from
 import { useStore } from '../../lib/store'
 import { financialSummary, salesByPaymentMethod } from '../../lib/analytics'
 import { formatDate, formatDateTime, inRange, money, number, periodRange, uid } from '../../lib/format'
+import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import {
   Badge,
   Button,
@@ -65,9 +66,14 @@ function SaleForm({ data, onClose, onSave, error: externalError }) {
   const newProductCount = form.lines.filter((line) => line.productName?.trim() && !findProduct(line)).length
 
   const submit = () => {
+    if (!isValidDateValue(form.date)) return setError('Enter a valid sale date and time.')
+    if (!isFiniteNumber(form.discount) || Number(form.discount) < 0) return setError('Enter a valid discount.')
+    if (!form.lines.every((line) => isFiniteNumber(line.quantity) && isFiniteNumber(line.unitPrice))) {
+      return setError('Enter a valid quantity and price for every sale line.')
+    }
     const validLines = form.lines.filter((line) => line.productName?.trim() && Number(line.quantity) > 0)
     if (!validLines.length) return setError('Add at least one product to the sale.')
-    if (Number(form.discount) < 0) return setError('Discount cannot be negative.')
+    if (validLines.some((line) => Number(line.unitPrice) <= 0)) return setError('Product prices must be greater than zero.')
     if (total < 0) return setError('Discount cannot exceed the sale total.')
 
     for (const line of validLines) {

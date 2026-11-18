@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Pencil, Plus, Settings2, Tag, Trash2, X } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { money, uid } from '../../lib/format'
+import { isFiniteNumber } from '../../lib/security'
 import { Badge, Button, Card, EmptyState, Field, IconButton, Modal, PageHeader, SectionHeading, Select } from '../../components/ui'
 
 const CONFIG_SECTIONS = [
@@ -159,6 +160,7 @@ function ProductForm({ product, config, inventory, onClose, onSave }) {
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const submit = () => {
     if (!form.name.trim()) return setError('Product name is required.')
+    if (!isFiniteNumber(form.cost) || !isFiniteNumber(form.price)) return setError('Enter valid cost and price amounts.')
     if (Number(form.cost) < 0 || Number(form.price) < 0) return setError('Amounts cannot be negative.')
     onSave({ ...form, name: form.name.trim(), cost: Number(form.cost), price: Number(form.price) })
   }

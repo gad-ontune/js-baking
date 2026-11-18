@@ -123,6 +123,28 @@
   }
 }
 
+@media (max-width: 640px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .data-table {
+    font-size: 0.8125rem;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+}
+
 @media print {
   .no-print {
     display: none !important;

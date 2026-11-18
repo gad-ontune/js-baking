@@ -4,6 +4,7 @@ import { CircleDollarSign, Pencil, Plus, ReceiptText, Search, Trash2 } from 'luc
 import { useStore } from '../../lib/store'
 import { expensesByCategory, expensesInRange } from '../../lib/analytics'
 import { compactMoney, formatDate, inRange, money, number, periodRange, uid } from '../../lib/format'
+import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, PeriodPicker, SearchInput, Select, StatCard } from '../../components/ui'
 
 const blankExpense = () => ({
@@ -21,6 +22,7 @@ export default function Expenses() {
   const [editing, setEditing] = useState(null)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(null)
+  const [reversalReason, setReversalReason] = useState('')
 
   const range = useMemo(() => periodRange(period, custom), [period, custom])
   const inPeriod = useMemo(() => expensesInRange(data, range), [data, range])
@@ -36,6 +38,9 @@ export default function Expenses() {
   const userName = (id) => data.users.find((user) => user.id === id)?.name || 'System'
 
   const save = (form) => {
+    if (!String(form.description || '').trim()) return notify('Description is required.', 'error')
+    if (!isFiniteNumber(form.amount) || Number(form.amount) <= 0) return notify('Enter a valid amount greater than zero.', 'error')
+    if (!isValidDateValue(form.date)) return notify('Enter a valid date.', 'error')
     if (editing) {
       mutate((draft) => {
         Object.assign(draft.expenses.find((expense) => expense.id === editing.id), form, { amount: Number(form.amount) })
@@ -56,13 +61,19 @@ export default function Expenses() {
     }
   }
 
-  const remove = () => {
+  const reverse = () => {
+    if (!reversalReason.trim()) return notify('A reversal reason is required.', 'error')
     mutate((draft) => {
-      draft.expenses = draft.expenses.filter((expense) => expense.id !== deleting.id)
-      addAudit(draft, 'EXPENSE_DELETED', 'Expense', `${deleting.reference} removed`)
+      const target = draft.expenses.find((expense) => expense.id === deleting.id)
+      target.reversed = true
+      target.reversalReason = reversalReason.trim()
+      target.reversedAt = new Date().toISOString()
+      target.reversedBy = draft.sessionUserId
+      addAudit(draft, 'EXPENSE_REVERSED', 'Expense', `${deleting.reference} reversed: ${reversalReason.trim()}`)
     })
-    notify('Expense removed.')
+    notify('Expense reversed and preserved in history.')
     setDeleting(null)
+    setReversalReason('')
   }
 
   return (
@@ -146,7 +157,7 @@ export default function Expenses() {
                     <td className="text-xs text-muted">{expense.paymentMethod}</td>
                     <td className="num font-bold text-red-600">{money(expense.amount)}</td>
                     <td className="text-xs text-muted">{userName(expense.recordedBy)}</td>
-                    <td><div className="flex justify-end gap-1"><IconButton icon={Pencil} label="Edit expense" onClick={() => setEditing(expense)} /><IconButton icon={Trash2} label="Delete expense" onClick={() => setDeleting(expense)} /></div></td>
+                    <td><div className="flex justify-end gap-1"><IconButton icon={Pencil} label="Edit expense" onClick={() => setEditing(expense)} /><IconButton icon={Trash2} label="Reverse expense" onClick={() => { setDeleting(expense); setReversalReason('') }} /></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -156,7 +167,19 @@ export default function Expenses() {
       </Card>
 
       {(creating || editing) && <ExpenseForm expense={editing} config={data.config} onClose={() => { setCreating(false); setEditing(null) }} onSave={save} />}
-      {deleting && <ConfirmDialog open onClose={() => setDeleting(null)} onConfirm={remove} danger title="Delete this expense?" description={`${deleting.description} (${money(deleting.amount)}) will be removed from business records.`} confirmLabel="Delete expense" />}
+      {deleting && (
+        <ConfirmDialog
+          open
+          onClose={() => setDeleting(null)}
+          onConfirm={reverse}
+          danger
+          title="Reverse this expense?"
+          description={`${deleting.description} (${money(deleting.amount)}) will be excluded from totals but preserved in the audit trail.`}
+          confirmLabel="Reverse expense"
+        >
+          <div className="w-full"><Field label="Reason for reversal"><input className="input" value={reversalReason} onChange={(event) => setReversalReason(event.target.value)} autoFocus /></Field></div>
+        </ConfirmDialog>
+      )}
     </div>
   )
 }
@@ -167,7 +190,7 @@ function ExpenseForm({ expense, config, onClose, onSave }) {
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const submit = () => {
     if (!form.description.trim()) return setError('Description is required.')
-    if (Number(form.amount) <= 0) return setError('Amount must be greater than zero.')
+    if (!isFiniteNumber(form.amount) || Number(form.amount) <= 0) return setError('Amount must be greater than zero.')
     onSave({ ...form, description: form.description.trim(), amount: Number(form.amount) })
   }
   return (

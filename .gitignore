@@ -1,7 +1,14 @@
 node_modules
 dist
 .env
-.env.local
+.env.*
+!.env.example
 .DS_Store
 *.log
 coverage
+*.pem
+*.key
+*.p12
+*.pfx
+secrets*.json
+credentials*.json

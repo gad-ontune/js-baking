@@ -103,7 +103,7 @@ export default function InventoryCategories() {
         </div>
       </Card>
 
-      {dialog?.mode !== 'delete' && (
+      {dialog && dialog.mode !== 'delete' && (
         <Modal
           open
           onClose={() => setDialog(null)}

@@ -4,6 +4,7 @@ import { Factory, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { productionSummary } from '../../lib/analytics'
 import { formatDate, inRange, number, periodRange, uid } from '../../lib/format'
+import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, PeriodPicker, SearchInput, Select, StatCard } from '../../components/ui'
 
 const blankRecord = () => ({
@@ -20,6 +21,7 @@ export default function Production() {
   const [editing, setEditing] = useState(null)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(null)
+  const [reversalReason, setReversalReason] = useState('')
 
   const range = useMemo(() => periodRange(period, custom), [period, custom])
   const summary = useMemo(() => productionSummary(data, range), [data, range])
@@ -32,6 +34,9 @@ export default function Production() {
   const userName = (id) => data.users.find((user) => user.id === id)?.name || 'System'
 
   const save = (form) => {
+    if (!String(form.productName || '').trim()) return notify('Product name is required.', 'error')
+    if (!isFiniteNumber(form.quantity) || Number(form.quantity) <= 0) return notify('Enter a valid quantity greater than zero.', 'error')
+    if (!isValidDateValue(form.date)) return notify('Enter a valid date.', 'error')
     if (editing) {
       mutate((draft) => {
         Object.assign(draft.production.find((record) => record.id === editing.id), form, { date: new Date(form.date).toISOString() })
@@ -52,13 +57,19 @@ export default function Production() {
     }
   }
 
-  const remove = () => {
+  const reverse = () => {
+    if (!reversalReason.trim()) return notify('A reversal reason is required.', 'error')
     mutate((draft) => {
-      draft.production = draft.production.filter((record) => record.id !== deleting.id)
-      addAudit(draft, 'PRODUCTION_DELETED', 'Production', `${deleting.productName} record removed`)
+      const target = draft.production.find((record) => record.id === deleting.id)
+      target.reversed = true
+      target.reversalReason = reversalReason.trim()
+      target.reversedAt = new Date().toISOString()
+      target.reversedBy = draft.sessionUserId
+      addAudit(draft, 'PRODUCTION_REVERSED', 'Production', `${deleting.productName} record reversed: ${reversalReason.trim()}`)
     })
-    notify('Production record removed.')
+    notify('Production record reversed and preserved in history.')
     setDeleting(null)
+    setReversalReason('')
   }
 
   return (
@@ -126,7 +137,7 @@ export default function Production() {
                     <td>
                       <div className="flex justify-end gap-1">
                         <IconButton icon={Pencil} label="Edit record" onClick={() => setEditing(record)} />
-                        <IconButton icon={Trash2} label="Delete record" onClick={() => setDeleting(record)} />
+                        <IconButton icon={Trash2} label="Reverse record" onClick={() => { setDeleting(record); setReversalReason('') }} />
                       </div>
                     </td>
                   </tr>
@@ -138,7 +149,19 @@ export default function Production() {
       </Card>
 
       {(creating || editing) && <ProductionForm record={editing} config={data.config} onClose={() => { setCreating(false); setEditing(null) }} onSave={save} />}
-      {deleting && <ConfirmDialog open onClose={() => setDeleting(null)} onConfirm={remove} danger title="Delete this production record?" description={`The record for ${number(deleting.quantity)} × ${deleting.productName} will be removed. This cannot be undone.`} confirmLabel="Delete record" />}
+      {deleting && (
+        <ConfirmDialog
+          open
+          onClose={() => setDeleting(null)}
+          onConfirm={reverse}
+          danger
+          title="Reverse this production record?"
+          description={`The record for ${number(deleting.quantity)} × ${deleting.productName} will be excluded from totals but preserved in the audit trail.`}
+          confirmLabel="Reverse record"
+        >
+          <div className="w-full"><Field label="Reason for reversal"><input className="input" value={reversalReason} onChange={(event) => setReversalReason(event.target.value)} autoFocus /></Field></div>
+        </ConfirmDialog>
+      )}
     </div>
   )
 }
@@ -149,7 +172,7 @@ function ProductionForm({ record, config, onClose, onSave }) {
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const submit = () => {
     if (!form.productName.trim()) return setError('Product name is required.')
-    if (Number(form.quantity) <= 0) return setError('Quantity must be greater than zero.')
+    if (!isFiniteNumber(form.quantity) || Number(form.quantity) <= 0) return setError('Quantity must be greater than zero.')
     onSave({ ...form, productName: form.productName.trim(), quantity: Number(form.quantity) })
   }
   return (

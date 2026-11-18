@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "node --test",
+    "audit:npm": "npm audit --audit-level=high",
+    "verify": "npm run test && npm run lint && npm run build && npm run audit:npm"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
