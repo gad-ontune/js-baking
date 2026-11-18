@@ -42,6 +42,7 @@ npm run preview
 - Sales performance and revenue-vs-expenses charts
 - Inventory distribution and best-selling product charts
 - Low-stock, expiry and unusually-high-expense alerts
+- Optional device notifications for new low-stock and expiry alerts (enable from the bell menu)
 - Chronological recent activity across purchases, sales, expenses, stock changes and production
 
 ### 2. Inventory management
@@ -94,6 +95,16 @@ npm run preview
 The interface uses a warm neutral canvas, deep charcoal text, bakery-brown accents, soft green positives, amber warnings and red critical alerts. It follows the specification's direction: clear navigation, summary cards, dense-but-readable tables, modal forms and minimal decorative noise.
 
 The shell is fully responsive: a collapsible sidebar on desktop and a slide-out drawer on small screens. Reports include dedicated print styling.
+
+### Device notifications
+
+New low-stock, out-of-stock and expiry alerts can also be delivered through the browser's native notification system:
+
+1. Open the bell menu in the top bar.
+2. Click **Enable notifications** and allow access when the browser asks.
+3. From then on, each *new* alert appears on the device as well as in the bell menu; clicking it opens the relevant inventory page.
+
+The first load records the existing alerts as a baseline, so enabling notifications does not produce a burst of old alerts. Reopening the app, recording a sale or adjusting stock will not repeat an alert that is already open. If permission is denied, the bell menu shows instructions to re-enable it in browser settings. Desktop notifications require a secure context (`localhost` or HTTPS).
 
 ---
 

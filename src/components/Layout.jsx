@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Apple,
   ArrowUpRight,
   Bell,
+  BellRing,
   Boxes,
   ChartNoAxesCombined,
   ChevronLeft,
@@ -32,7 +33,16 @@ import {
 import { useStore } from '../lib/store'
 import { inventoryAlerts, periodLabel } from '../lib/analytics'
 import { formatDate } from '../lib/format'
-import { Avatar, Badge } from './ui'
+import {
+  alertKey,
+  fireDeviceNotification,
+  notificationPermission,
+  notificationsSupported,
+  readSeenAlerts,
+  requestNotificationPermission,
+  writeSeenAlerts,
+} from '../lib/deviceNotifications'
+import { Avatar, Badge, Button } from './ui'
 
 const NAV_GROUPS = [
   {
@@ -185,6 +195,14 @@ function NotificationsPanel({ onClose }) {
   const { data } = useStore()
   const alerts = useMemo(() => inventoryAlerts(data), [data])
   const navigate = useNavigate()
+  const [permission, setPermission] = useState(notificationPermission)
+  const [requesting, setRequesting] = useState(false)
+
+  const enable = async () => {
+    setRequesting(true)
+    setPermission(await requestNotificationPermission())
+    setRequesting(false)
+  }
 
   return (
     <div className="absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-line bg-white p-2 shadow-lift">
@@ -192,7 +210,35 @@ function NotificationsPanel({ onClose }) {
         <p className="font-display text-base font-semibold">Alerts</p>
         <Badge tone={alerts.length ? 'red' : 'leaf'}>{alerts.length} open</Badge>
       </div>
-      <div className="max-h-80 overflow-y-auto">
+
+      {notificationsSupported() ? (
+        <div className="mx-1 mb-2 rounded-xl border border-bakery-100 bg-bakery-50 p-3">
+          <div className="flex items-center gap-2">
+            <BellRing size={14} className="text-bakery-700" />
+            <p className="text-xs font-bold text-bakery-900">
+              {permission === 'granted' ? 'Desktop notifications on' : permission === 'denied' ? 'Desktop notifications blocked' : 'Get desktop notifications'}
+            </p>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-bakery-800/80">
+            {permission === 'granted'
+              ? 'New low-stock and expiry alerts will also appear on this device.'
+              : permission === 'denied'
+                ? 'Allow notifications for this site in your browser settings to receive alerts on this device.'
+                : 'Turn this on to see new stock alerts even when the app is in the background.'}
+          </p>
+          {permission === 'default' && (
+            <Button size="sm" variant="primary" icon={BellRing} className="mt-2 w-full" onClick={enable} disabled={requesting}>
+              {requesting ? 'Waiting for permission…' : 'Enable notifications'}
+            </Button>
+          )}
+        </div>
+      ) : (
+        <p className="mx-1 mb-2 rounded-xl bg-slate-50 p-3 text-[11px] text-muted">
+          This browser does not support desktop notifications. In-app alerts still work.
+        </p>
+      )}
+
+      <div className="max-h-72 overflow-y-auto">
         {alerts.slice(0, 6).map((alert) => (
           <button
             key={alert.id}
@@ -226,6 +272,46 @@ export default function Layout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [query, setQuery] = useState('')
   const alerts = useMemo(() => inventoryAlerts(data), [data])
+  const seenAlertsRef = useRef(null)
+
+  // Fire a device notification only for alerts that did not exist before. The
+  // first load establishes a baseline so the seeded demo alerts don't all fire.
+  useEffect(() => {
+    const currentKeys = alerts.map(alertKey)
+    const currentSet = new Set(currentKeys)
+
+    if (seenAlertsRef.current === null) {
+      seenAlertsRef.current = readSeenAlerts() || new Set(currentKeys)
+    }
+    const seen = seenAlertsRef.current
+    const fresh = alerts.filter((alert) => !seen.has(alertKey(alert)))
+
+    if (fresh.length) {
+      const destinationFor = (alert) =>
+        alert.status === 'expiring' || alert.status === 'expired' ? '/inventory/expiry' : '/inventory/low-stock'
+
+      fresh.slice(0, 3).forEach((alert) => {
+        fireDeviceNotification({
+          title: `${alert.title} — ${data.business.name}`,
+          body: alert.detail,
+          tag: `alert-${alertKey(alert)}`,
+          onClick: () => navigate(destinationFor(alert)),
+        })
+      })
+      if (fresh.length > 3) {
+        fireDeviceNotification({
+          title: `${fresh.length - 3} more alerts — ${data.business.name}`,
+          body: 'Open the bakery app to review all open alerts.',
+          tag: 'alerts-summary',
+          onClick: () => navigate('/inventory/low-stock'),
+        })
+      }
+      fresh.forEach((alert) => seen.add(alertKey(alert)))
+    }
+
+    ;[...seen].forEach((key) => { if (!currentSet.has(key)) seen.delete(key) })
+    writeSeenAlerts(seen)
+  }, [alerts, data.business.name, navigate])
 
   const title = ROUTE_TITLES[location.pathname] || 'Dashboard'
   const period = periodLabel('30d')
