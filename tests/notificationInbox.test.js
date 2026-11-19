@@ -7,6 +7,7 @@ import {
   alertId,
   filterNotifications,
   loadNotifications,
+  notificationIconKind,
   persistNotifications,
   reconcileAlerts,
   sanitizeNotifications,
@@ -135,6 +136,14 @@ test('persisted notifications are sanitised and stored per user', () => {
     assert.deepEqual(loadNotifications(null), malicious)
     assert.deepEqual(loadNotifications('usr_new'), [])
   })
+})
+
+test('notificationIconKind maps inbox entries without destructuring props', () => {
+  assert.equal(notificationIconKind({ severity: 'critical', type: 'inventory' }), 'critical')
+  assert.equal(notificationIconKind({ severity: 'warning', type: 'inventory' }), 'warning')
+  assert.equal(notificationIconKind({ severity: 'info', type: 'system' }), 'system')
+  assert.equal(notificationIconKind({ severity: 'info', type: 'inventory' }), 'info')
+  assert.equal(notificationIconKind(), 'info')
 })
 
 test('filterNotifications applies tabs, severity and search', () => {

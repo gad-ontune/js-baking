@@ -59,6 +59,14 @@ export const destinationFor = (alert) => {
   return '/inventory/low-stock'
 }
 
+/** Icon kind for an inbox entry. Kept pure so it can be unit tested. */
+export function notificationIconKind(item = {}) {
+  if (item?.severity === 'critical') return 'critical'
+  if (item?.severity === 'warning') return 'warning'
+  if (item?.type === 'system') return 'system'
+  return 'info'
+}
+
 export const alertId = (alert) => `inventory:${alert.id}:${alert.status}`
 
 /**

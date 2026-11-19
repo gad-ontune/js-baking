@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../lib/store'
 import { useNotifications } from '../lib/notificationCenter'
-import { filterNotifications } from '../lib/notificationInbox'
+import { filterNotifications, notificationIconKind } from '../lib/notificationInbox'
 import {
   fireDeviceNotification,
   notificationPermission,
@@ -37,12 +37,14 @@ const TABS = [
 
 const severityTone = { critical: 'red', warning: 'amber', info: 'bakery' }
 
-function NotificationIcon({ item }) {
-  if (item.severity === 'critical') return CircleAlert
-  if (item.severity === 'warning') return TriangleAlert
-  if (item.type === 'system') return BellRing
-  return Info
+const NOTIFICATION_ICONS = {
+  critical: CircleAlert,
+  warning: TriangleAlert,
+  system: BellRing,
+  info: Info,
 }
+
+const NotificationIcon = (item) => NOTIFICATION_ICONS[notificationIconKind(item)]
 
 export default function Notifications() {
   const { data, notify } = useStore()
