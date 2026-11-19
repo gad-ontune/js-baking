@@ -63,6 +63,9 @@ def _upgrade_sqlite_schema(models_module) -> None:
 
 
 def init_db() -> None:
+    if not settings.auto_create_schema:
+        # Migrations are the only schema authority in deployed environments.
+        return
     if settings.database_url.startswith('sqlite:///./'):
         path = Path(settings.database_url.replace('sqlite:///./', ''))
         path.parent.mkdir(parents=True, exist_ok=True)

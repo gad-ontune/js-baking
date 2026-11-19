@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     environment: str = 'development'
 
     database_url: str = 'sqlite:///./jsbh_dev.db'
+    # Set to false in deployments where Alembic owns the schema.
+    auto_create_schema: bool = True
     cors_origins: str = (
         'http://localhost:5173,http://127.0.0.1:5173,'
         'http://localhost:4173,http://127.0.0.1:4173'
