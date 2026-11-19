@@ -45,6 +45,31 @@ class Session(Base):
     user: Mapped[User] = relationship(back_populates='sessions')
 
 
+class BusinessRecord(Base):
+    """Typed business data. Payloads are validated by Pydantic at the API edge.
+
+    Keeping records in one append-oriented table lets the API apply consistent
+    permission and audit rules across every business module while preserving
+    the exact field shapes the existing SPA uses.
+    """
+
+    __tablename__ = 'business_records'
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('inventory', 'movement', 'supplier', 'product', 'purchase', 'sale', 'expense', 'production')",
+            name='ck_business_records_kind',
+        ),
+        Index('ix_business_records_kind', 'kind'),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now, onupdate=utc_now)
+
+
 class AuditLog(Base):
     __tablename__ = 'audit_logs'
     __table_args__ = (

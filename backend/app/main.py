@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .database import init_db
-from .routers import audit, auth, users
+from .routers import audit, auth, business, users
 
 logger = logging.getLogger('jsbh.api')
 
@@ -102,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=settings.api_prefix)
     app.include_router(users.router, prefix=settings.api_prefix)
     app.include_router(audit.router, prefix=settings.api_prefix)
+    app.include_router(business.router, prefix=settings.api_prefix)
 
     @app.get('/health', tags=['system'])
     def health() -> dict[str, str]:
