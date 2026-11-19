@@ -1,0 +1,22 @@
+# Local demo overlay. Uses the same PostgreSQL/Redis stack but disables the
+# production guards so the public seed data and one-time dev codes work.
+#
+#   cp deploy/demo.env.example .env
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+#
+# Open http://localhost:8080 and use the one-click demo accounts.
+
+services:
+  backend:
+    environment:
+      ENVIRONMENT: development
+      COOKIE_SECURE: 'false'
+      COOKIE_SAMESITE: lax
+      CORS_ORIGINS: http://localhost:8080,http://127.0.0.1:8080
+      FRONTEND_URL: http://localhost:8080
+      JSBH_ALLOW_DEMO_SEED: 'true'
+      SMTP_HOST: ''
+      SMTP_FROM: ''
+      SEED_OWNER_USERNAME: ''
+      SEED_OWNER_PASSWORD: ''
+      SEED_OWNER_EMAIL: ''

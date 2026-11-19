@@ -15,4 +15,6 @@ paths = [
   '''SECURITY_ASSESSMENT\.md''',
   '''\.env\.example''',
   '''docker-compose\.yml''',
+  '''docker-compose\.demo\.yml''',
+  '''deploy/demo\.env\.example''',
 ]

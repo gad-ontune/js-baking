@@ -14,7 +14,7 @@ class User(Base):
         CheckConstraint("role IN ('owner', 'manager', 'staff')", name='ck_users_role'),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     username: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -38,7 +38,7 @@ class Session(Base):
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -66,10 +66,10 @@ class BusinessRecord(Base):
         Index('ix_business_records_kind', 'kind'),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
-    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now, onupdate=utc_now)
 
@@ -81,12 +81,12 @@ class AuditLog(Base):
         UniqueConstraint('sequence_number', name='uq_audit_logs_sequence_number'),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
     event_type: Mapped[str] = mapped_column(String(80), nullable=False)
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     entity: Mapped[str] = mapped_column(String(80), nullable=False)
     entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     outcome: Mapped[str] = mapped_column(String(20), nullable=False, default='success')
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     old_values: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -119,13 +119,13 @@ class SecurityToken(Base):
         Index('ix_security_tokens_user_id', 'user_id'),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    user_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    issued_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    issued_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
 
 
@@ -138,8 +138,8 @@ class RecoveryCode(Base):
         Index('ix_recovery_codes_user_id', 'user_id'),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
