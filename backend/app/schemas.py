@@ -142,8 +142,30 @@ class UserResponse(StrictModel):
 
 class LoginResponse(StrictModel):
     user: UserResponse
-    csrf_token: str
-    session_expires_at: datetime
+    csrf_token: str | None = None
+    session_expires_at: datetime | None = None
+    mfa_required: bool = False
+    mfa_challenge_token: str | None = None
+
+
+class MfaSetupResponse(StrictModel):
+    secret: str
+    provisioning_uri: str
+    recovery_codes: list[str]
+
+
+class MfaCodeRequest(StrictModel):
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MfaChallengeRequest(StrictModel):
+    challenge_token: str = Field(min_length=10, max_length=256)
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MfaDisableRequest(StrictModel):
+    code: str = Field(min_length=6, max_length=32)
+    password: str = Field(min_length=1, max_length=1024)
 
 
 class AuditResponse(StrictModel):

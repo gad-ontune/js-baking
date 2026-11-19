@@ -41,23 +41,29 @@ def issue_token(
     return plaintext, token
 
 
-def consume_token(db: Session, plaintext: str, kind: str) -> SecurityToken:
-    """Validate and atomically consume a token. Generic errors avoid oracles."""
-    invalid = HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail='This code is invalid or has expired. Request a new one.',
-    )
-    if not plaintext or len(plaintext) > 256:
-        raise invalid
+_INVALID_TOKEN = HTTPException(
+    status_code=status.HTTP_400_BAD_REQUEST,
+    detail='This code is invalid or has expired. Request a new one.',
+)
 
+
+def validate_token(db: Session, plaintext: str, kind: str) -> SecurityToken:
+    """Check a token without consuming it (used for retryable MFA challenges)."""
+    if not plaintext or len(plaintext) > 256:
+        raise _INVALID_TOKEN
     token = db.query(SecurityToken).filter(
         SecurityToken.token_hash == hash_security_token(plaintext),
         SecurityToken.kind == kind,
         SecurityToken.used_at.is_(None),
     ).first()
     if not token or token.expires_at <= utc_now():
-        raise invalid
+        raise _INVALID_TOKEN
+    return token
 
+
+def consume_token(db: Session, plaintext: str, kind: str) -> SecurityToken:
+    """Validate and atomically consume a token. Generic errors avoid oracles."""
+    token = validate_token(db, plaintext, kind)
     # Conditional update prevents two simultaneous requests from both using it.
     updated = db.query(SecurityToken).filter(
         SecurityToken.id == token.id,
@@ -65,6 +71,6 @@ def consume_token(db: Session, plaintext: str, kind: str) -> SecurityToken:
     ).update({SecurityToken.used_at: utc_now()}, synchronize_session=False)
     db.commit()
     if not updated:
-        raise invalid
+        raise _INVALID_TOKEN
     db.refresh(token)
     return token

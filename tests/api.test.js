@@ -120,6 +120,45 @@ test('recovery and verification helpers call the documented routes', async () =>
   assert.equal(calls.every((call) => call.options.credentials === 'include'), true)
 })
 
+test('MFA helpers expose challenge login and enrolment routes', async () => {
+  const responses = [
+    jsonResponse({ user: { username: 'amina', role: 'owner', active: true }, mfa_required: true, mfa_challenge_token: 'challenge-1' }),
+    jsonResponse({ user: { username: 'amina', role: 'owner', active: true }, csrf_token: 'csrf-2', session_expires_at: '2026-12-01T00:00:00Z' }),
+    jsonResponse({ secret: 'SECRET', provisioning_uri: 'otpauth://totp/example', recovery_codes: ['ABCD-EFGH-IJKL'] }),
+    jsonResponse({ message: 'enabled' }),
+    jsonResponse({ message: 'disabled' }),
+  ]
+  let index = 0
+  const calls = []
+  const client = createApiClient({
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options })
+      return responses[index++]
+    },
+    getCookie: () => 'jsbh_csrf=csrf-token-42',
+  })
+
+  const challenged = await client.login('amina', 'Password2040!')
+  assert.equal(challenged.mfaRequired, true)
+  assert.equal(challenged.challengeToken, 'challenge-1')
+  assert.equal(challenged.csrfToken, undefined)
+
+  const completed = await client.completeMfa('challenge-1', '123456')
+  assert.equal(completed.csrfToken, 'csrf-2')
+  const setup = await client.setupMfa()
+  assert.deepEqual(setup.recovery_codes, ['ABCD-EFGH-IJKL'])
+  await client.enableMfa('123456')
+  await client.disableMfa('123456', 'Password2040!')
+
+  assert.deepEqual(calls.map((call) => `${call.options.method} ${call.url}`), [
+    'POST /api/v1/auth/login',
+    'POST /api/v1/auth/mfa/complete',
+    'POST /api/v1/auth/mfa/setup',
+    'POST /api/v1/auth/mfa/enable',
+    'POST /api/v1/auth/mfa/disable',
+  ])
+})
+
 test('business helpers use server-authoritative routes and send CSRF on writes', async () => {
   const { calls, fetchImpl } = mockFetch(jsonResponse({ ok: true }))
   const client = createApiClient({ fetchImpl, getCookie: () => 'jsbh_csrf=csrf-token-42' })

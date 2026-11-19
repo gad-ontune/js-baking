@@ -139,8 +139,24 @@ export function createApiClient({
         method: 'POST',
         body: { username, password },
       })
+      return {
+        user: mapUser(payload.user),
+        csrfToken: payload.csrf_token,
+        sessionExpiresAt: payload.session_expires_at,
+        mfaRequired: Boolean(payload.mfa_required),
+        challengeToken: payload.mfa_challenge_token || '',
+      }
+    },
+    completeMfa: async (challengeToken, code) => {
+      const payload = await request('/auth/mfa/complete', {
+        method: 'POST',
+        body: { challenge_token: challengeToken, code },
+      })
       return { user: mapUser(payload.user), csrfToken: payload.csrf_token, sessionExpiresAt: payload.session_expires_at }
     },
+    setupMfa: () => request('/auth/mfa/setup', { method: 'POST', body: {} }),
+    enableMfa: (code) => request('/auth/mfa/enable', { method: 'POST', body: { code } }),
+    disableMfa: (code, password) => request('/auth/mfa/disable', { method: 'POST', body: { code, password } }),
     logout: () => request('/auth/logout', { method: 'POST' }),
     forgotPassword: async (username, email) => {
       const payload = await request('/auth/forgot-password', {

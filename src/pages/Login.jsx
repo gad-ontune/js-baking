@@ -19,7 +19,7 @@ function AuthLoading() {
 }
 
 export default function Login() {
-  const { currentUser, authStatus, apiAvailable, signIn, notify, data } = useStore()
+  const { currentUser, authStatus, apiAvailable, signIn, completeMfa, notify, data } = useStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -35,6 +35,10 @@ export default function Login() {
   const [recoveryResult, setRecoveryResult] = useState(null)
   const [recoveryBusy, setRecoveryBusy] = useState(false)
   const [recoveryError, setRecoveryError] = useState('')
+  const [mfaChallenge, setMfaChallenge] = useState('')
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaError, setMfaError] = useState('')
+  const [mfaBusy, setMfaBusy] = useState(false)
 
   useEffect(() => {
     const token = searchParams.get('token')
@@ -48,6 +52,15 @@ export default function Login() {
   if (currentUser) return <Navigate to="/dashboard" replace />
 
   const locked = Date.now() < lockedUntil
+
+  const finishSignIn = (user) => {
+    setFailedAttempts(0)
+    setLockedUntil(0)
+    notify(`Welcome back, ${user.name.split(' ')[0]}!`)
+    const requested = location.state?.from
+    const target = safeInternalPath(requested, window.location.origin) || '/dashboard'
+    navigate(target, { replace: true })
+  }
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -71,12 +84,23 @@ export default function Login() {
       return
     }
 
-    setFailedAttempts(0)
-    setLockedUntil(0)
-    notify(`Welcome back, ${result.user.name.split(' ')[0]}!`)
-    const requested = location.state?.from
-    const target = safeInternalPath(requested, window.location.origin) || '/dashboard'
-    navigate(target, { replace: true })
+    if (result.mfaRequired) {
+      setMfaChallenge(result.challengeToken)
+      setMfaCode('')
+      setMfaError('')
+      return
+    }
+    finishSignIn(result.user)
+  }
+
+  const submitMfa = async () => {
+    setMfaError('')
+    setMfaBusy(true)
+    const result = await completeMfa(mfaChallenge, mfaCode.trim())
+    setMfaBusy(false)
+    if (!result.ok) return setMfaError(result.message)
+    setMfaChallenge('')
+    finishSignIn(result.user)
   }
 
   const fillDemo = (user, pass) => {
@@ -255,6 +279,22 @@ export default function Login() {
           </div>
         </div>
       </div>
+
+      {mfaChallenge && (
+        <Modal
+          open
+          onClose={() => { setMfaChallenge(''); setMfaCode('') }}
+          title="Two-factor verification"
+          description="Enter the 6-digit code from your authenticator app, or one of your recovery codes."
+          size="sm"
+          footer={<><Button onClick={() => { setMfaChallenge(''); setMfaCode('') }} disabled={mfaBusy}>Cancel</Button>
+            <Button variant="primary" onClick={submitMfa} disabled={mfaBusy || !mfaCode.trim()}>{mfaBusy ? 'Verifying…' : 'Verify'}</Button></>}
+        >
+          <Field label="Verification code" error={mfaError}>
+            <input className="input font-mono" value={mfaCode} onChange={(event) => setMfaCode(event.target.value)} autoComplete="one-time-code" autoFocus />
+          </Field>
+        </Modal>
+      )}
 
       {recoveryOpen && (
         <Modal

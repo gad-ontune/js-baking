@@ -23,6 +23,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False, default='staff')
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Fernet-encrypted TOTP secret; never exposed after initial enrolment.
+    mfa_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
 
@@ -119,4 +121,20 @@ class SecurityToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     issued_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
+
+
+class RecoveryCode(Base):
+    """Hashed single-use substitutes for a TOTP code during sign-in."""
+
+    __tablename__ = 'recovery_codes'
+    __table_args__ = (
+        UniqueConstraint('code_hash', name='uq_recovery_codes_code_hash'),
+        Index('ix_recovery_codes_user_id', 'user_id'),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)

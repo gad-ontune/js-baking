@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, MailCheck, Pencil, Plus, RefreshCw, ShieldCheck, ShieldOff, UserCog, Users as UsersIcon } from 'lucide-react'
+import { KeyRound, MailCheck, Pencil, Plus, RefreshCw, ShieldCheck, ShieldOff, Smartphone, UserCog, Users as UsersIcon } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { api } from '../../lib/api'
 import { formatDate } from '../../lib/format'
@@ -24,13 +24,19 @@ const PERMISSION_ROWS = [
 const blankUser = { name: '', username: '', password: '', email: '', role: 'staff', active: true }
 
 export default function Users() {
-  const { currentUser, notify, setDirectory } = useStore()
+  const { currentUser, notify, setDirectory, refreshUser } = useStore()
   const [users, setUsers] = useState([])
   const [editing, setEditing] = useState(null)
   const [creating, setCreating] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
   const [resetTarget, setResetTarget] = useState(null)
   const [resetResult, setResetResult] = useState(null)
+  const [mfaDialog, setMfaDialog] = useState(null)
+  const [mfaSetup, setMfaSetup] = useState(null)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaPassword, setMfaPassword] = useState('')
+  const [mfaError, setMfaError] = useState('')
+  const [mfaBusy, setMfaBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -131,6 +137,59 @@ export default function Users() {
     }
   }
 
+  const closeMfa = () => {
+    setMfaDialog(null)
+    setMfaSetup(null)
+    setMfaCode('')
+    setMfaPassword('')
+    setMfaError('')
+  }
+
+  const startMfaSetup = async () => {
+    setMfaError('')
+    setMfaBusy(true)
+    try {
+      const setup = await api.setupMfa()
+      setMfaSetup(setup)
+      setMfaDialog('setup')
+      notify('Scan the QR details with your authenticator app, then enter a code to confirm.')
+    } catch (setupError) {
+      notify(setupError.message, 'error')
+    } finally {
+      setMfaBusy(false)
+    }
+  }
+
+  const confirmMfaEnable = async () => {
+    setMfaError('')
+    setMfaBusy(true)
+    try {
+      await api.enableMfa(mfaCode.trim())
+      await refreshUser()
+      notify('Multi-factor authentication is enabled.')
+      closeMfa()
+    } catch (enableError) {
+      setMfaError(enableError.message)
+    } finally {
+      setMfaBusy(false)
+    }
+  }
+
+  const confirmMfaDisable = async () => {
+    setMfaError('')
+    setMfaBusy(true)
+    try {
+      await api.disableMfa(mfaCode.trim(), mfaPassword)
+      await refreshUser()
+      notify('Multi-factor authentication is disabled.')
+      closeMfa()
+    } catch (disableError) {
+      setMfaError(disableError.message)
+    } finally {
+      setMfaBusy(false)
+    }
+  }
+
   const savePassword = async ({ currentPassword, newPassword }) => {
     setBusy(true)
     try {
@@ -154,6 +213,9 @@ export default function Users() {
         actions={
           <div className="flex flex-wrap gap-2">
             {!currentUser?.emailVerified && <Button icon={MailCheck} onClick={sendVerification} disabled={busy}>Verify my email</Button>}
+            <Button icon={Smartphone} onClick={() => currentUser?.mfaEnabled ? setMfaDialog('disable') : startMfaSetup()} disabled={mfaBusy}>
+              {currentUser?.mfaEnabled ? 'Disable MFA' : 'Set up MFA'}
+            </Button>
             <Button icon={KeyRound} onClick={() => setChangingPassword(true)}>Change my password</Button>
             <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>Add user</Button>
           </div>
@@ -263,6 +325,52 @@ export default function Users() {
 
       {changingPassword && (
         <PasswordForm busy={busy} onClose={() => setChangingPassword(false)} onSave={savePassword} />
+      )}
+
+      {mfaDialog === 'setup' && mfaSetup && (
+        <Modal
+          open
+          onClose={closeMfa}
+          title="Set up two-factor authentication"
+          description="Add this secret to your authenticator app, save the recovery codes somewhere safe, then enter a 6-digit code to finish."
+          size="md"
+          footer={<><Button onClick={closeMfa} disabled={mfaBusy}>Cancel</Button>
+            <Button variant="primary" onClick={confirmMfaEnable} disabled={mfaBusy || !mfaCode.trim()}>{mfaBusy ? 'Saving…' : 'Enable MFA'}</Button></>}
+        >
+          <div className="grid gap-4">
+            {mfaError && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{mfaError}</p>}
+            <div className="rounded-xl border border-line bg-canvas p-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted">Authenticator secret</p>
+              <code className="mt-1 block break-all font-mono text-sm">{mfaSetup.secret}</code>
+              <p className="mt-2 text-xs text-muted">App link: <span className="break-all">{mfaSetup.provisioning_uri}</span></p>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-amber-800">Recovery codes — shown once</p>
+              <div className="mt-2 grid grid-cols-2 gap-1 font-mono text-xs text-amber-900">
+                {mfaSetup.recovery_codes.map((code) => <span key={code}>{code}</span>)}
+              </div>
+            </div>
+            <Field label="6-digit code from your app"><input className="input font-mono" value={mfaCode} onChange={(event) => setMfaCode(event.target.value)} autoComplete="one-time-code" /></Field>
+          </div>
+        </Modal>
+      )}
+
+      {mfaDialog === 'disable' && (
+        <Modal
+          open
+          onClose={closeMfa}
+          title="Disable two-factor authentication"
+          description="Confirm with your password and a current authenticator or recovery code."
+          size="sm"
+          footer={<><Button onClick={closeMfa} disabled={mfaBusy}>Cancel</Button>
+            <Button variant="primary" onClick={confirmMfaDisable} disabled={mfaBusy || !mfaCode.trim() || !mfaPassword}>{mfaBusy ? 'Saving…' : 'Disable MFA'}</Button></>}
+        >
+          <div className="grid gap-4">
+            {mfaError && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{mfaError}</p>}
+            <Field label="Current password"><input className="input" type="password" value={mfaPassword} onChange={(event) => setMfaPassword(event.target.value)} autoComplete="current-password" /></Field>
+            <Field label="Authenticator or recovery code"><input className="input font-mono" value={mfaCode} onChange={(event) => setMfaCode(event.target.value)} autoComplete="one-time-code" /></Field>
+          </div>
+        </Modal>
       )}
 
       {resetTarget && (

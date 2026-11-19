@@ -179,15 +179,22 @@ export function StoreProvider({ children }) {
     [currentUser],
   )
 
+  const applySession = useCallback((result) => {
+    setCurrentUser(result.user)
+    setAuthStatus('authenticated')
+    setApiAvailable(true)
+    hydrateBusiness()
+    api.listUsers().then(setDirectory).catch(() => setDirectory([result.user]))
+  }, [setDirectory, hydrateBusiness])
+
   const signIn = useCallback(
     async (username, password) => {
       try {
         const result = await api.login(username, password)
-        setCurrentUser(result.user)
-        setAuthStatus('authenticated')
-        setApiAvailable(true)
-        hydrateBusiness()
-        api.listUsers().then(setDirectory).catch(() => setDirectory([result.user]))
+        if (result.mfaRequired) {
+          return { ok: true, mfaRequired: true, challengeToken: result.challengeToken }
+        }
+        applySession(result)
         return { ok: true, user: result.user }
       } catch (error) {
         return {
@@ -197,8 +204,29 @@ export function StoreProvider({ children }) {
         }
       }
     },
-    [setDirectory, hydrateBusiness],
+    [applySession],
   )
+
+  const completeMfa = useCallback(async (challengeToken, code) => {
+    try {
+      const result = await api.completeMfa(challengeToken, code)
+      applySession(result)
+      return { ok: true, user: result.user }
+    } catch (error) {
+      return { ok: false, message: error.message }
+    }
+  }, [applySession])
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const user = await api.me()
+      setCurrentUser(user)
+      setDirectory([user])
+      return user
+    } catch {
+      return null
+    }
+  }, [setDirectory])
 
   const signOut = useCallback(async () => {
     try {
@@ -268,13 +296,15 @@ export function StoreProvider({ children }) {
       apiAvailable,
       can,
       signIn,
+      completeMfa,
+      refreshUser,
       signOut,
       changePassword,
       touchSession,
       resetDemo,
       setDirectory,
     }),
-    [data, mutate, addAudit, businessWrite, hydrateBusiness, notify, toasts, dismissToast, currentUser, authStatus, apiAvailable, can, signIn, signOut, changePassword, touchSession, resetDemo, setDirectory],
+    [data, mutate, addAudit, businessWrite, hydrateBusiness, notify, toasts, dismissToast, currentUser, authStatus, apiAvailable, can, signIn, completeMfa, refreshUser, signOut, changePassword, touchSession, resetDemo, setDirectory],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

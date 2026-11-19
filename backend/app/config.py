@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     reset_token_minutes: int = 30
     email_verification_token_minutes: int = 60
     mfa_challenge_minutes: int = 5
+    # Base64-urlsafe 32-byte Fernet key. Required in production to encrypt
+    # authenticator secrets at rest. Development derives a throwaway key.
+    mfa_encryption_key: str = ''
 
     seed_owner_username: str = ''
     seed_owner_password: str = ''

@@ -11,16 +11,21 @@ from ..auth import (
 from ..config import settings
 from ..database import get_db
 from ..email_service import email_configured, send_email_verification, send_password_reset
+from .. import mfa as mfa_service
+from ..models import RecoveryCode
 from ..models import Session as SessionModel
 from ..models import User
 from ..ratelimit import rate_limiter
 from ..schemas import (
     EmailVerificationRequest, ForgotPasswordRequest, ForgotPasswordResponse,
-    LoginRequest, LoginResponse, PasswordChangeRequest, ResetPasswordRequest,
+    LoginRequest, LoginResponse, MfaChallengeRequest, MfaCodeRequest,
+    MfaDisableRequest, MfaSetupResponse, PasswordChangeRequest, ResetPasswordRequest,
     ResetPasswordResponse, UserResponse, VerificationResponse,
 )
-from ..security import hash_password, needs_rehash, utc_now, verify_password
-from ..tokens import consume_token, issue_token
+from ..security import (
+    hash_password, hash_security_token, needs_rehash, new_id, utc_now, verify_password,
+)
+from ..tokens import consume_token, issue_token, validate_token
 
 router = APIRouter(prefix='/auth', tags=['auth'])
 
@@ -52,6 +57,20 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
 
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(payload.password)
+
+    if user.mfa_enabled:
+        # Password is correct, but no session is created until the second factor
+        # is verified. The short-lived challenge carries no privileges.
+        challenge, _ = issue_token(db, user, 'mfa_challenge')
+        record_audit(
+            db, request, event_type='AUTH', action='MFA_CHALLENGE_ISSUED',
+            entity='User', entity_id=user.id, user_id=user.id,
+        )
+        return LoginResponse(
+            user=UserResponse.model_validate(user),
+            mfa_required=True,
+            mfa_challenge_token=challenge,
+        )
 
     csrf_token, expires_at = create_session(db, request, response, user)
     rate_limiter.clear(user_key)
@@ -273,3 +292,166 @@ def verify_email(
         details='Email address verified with a single-use code',
     )
     return {'message': 'Email address verified.'}
+
+
+# ---------------------------------------------------------------------------
+# Multi-factor authentication (TOTP + single-use recovery codes)
+# ---------------------------------------------------------------------------
+
+def _use_recovery_code(db: Session, user: User, code: str) -> bool:
+    normalized = mfa_service.normalize_recovery_code(code)
+    if len(normalized) != mfa_service.RECOVERY_CODE_LENGTH:
+        return False
+    record = db.query(RecoveryCode).filter(
+        RecoveryCode.user_id == user.id,
+        RecoveryCode.code_hash == hash_security_token(normalized),
+        RecoveryCode.used_at.is_(None),
+    ).first()
+    if not record:
+        return False
+    updated = db.query(RecoveryCode).filter(
+        RecoveryCode.id == record.id, RecoveryCode.used_at.is_(None),
+    ).update({RecoveryCode.used_at: utc_now()}, synchronize_session=False)
+    db.commit()
+    return bool(updated)
+
+
+def _verify_second_factor(db: Session, user: User, code: str, request: Request) -> bool:
+    if user.mfa_secret_enc and mfa_service.verify_code(mfa_service.decrypt_secret(user.mfa_secret_enc), code):
+        return True
+    if _use_recovery_code(db, user, code):
+        record_audit(
+            db, request, event_type='AUTH', action='MFA_RECOVERY_CODE_USED',
+            entity='User', entity_id=user.id, user_id=user.id,
+            details='A single-use MFA recovery code was accepted',
+        )
+        return True
+    return False
+
+
+@router.post('/mfa/setup', response_model=MfaSetupResponse, dependencies=[Depends(require_csrf)])
+def setup_mfa(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MfaSetupResponse:
+    mfa_service.require_mfa_key()
+    if user.mfa_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='MFA is already enabled.')
+
+    secret = mfa_service.generate_secret()
+    recovery_codes = mfa_service.generate_recovery_codes()
+    user.mfa_secret_enc = mfa_service.encrypt_secret(secret)
+    db.query(RecoveryCode).filter(RecoveryCode.user_id == user.id).delete(synchronize_session=False)
+    db.add_all([
+        RecoveryCode(
+            id=new_id('rec_'), user_id=user.id,
+            code_hash=hash_security_token(mfa_service.normalize_recovery_code(code)),
+        )
+        for code in recovery_codes
+    ])
+    db.commit()
+    record_audit(
+        db, request, event_type='AUTH', action='MFA_SETUP_STARTED',
+        entity='User', entity_id=user.id, user_id=user.id,
+        details='Authenticator secret and recovery codes generated; values omitted',
+    )
+    return MfaSetupResponse(
+        secret=secret,
+        provisioning_uri=mfa_service.provisioning_uri(user.username, secret),
+        recovery_codes=recovery_codes,
+    )
+
+
+@router.post('/mfa/enable', dependencies=[Depends(require_csrf)])
+def enable_mfa(
+    payload: MfaCodeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    mfa_service.require_mfa_key()
+    if not user.mfa_secret_enc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Start MFA setup first.')
+    if not mfa_service.verify_code(mfa_service.decrypt_secret(user.mfa_secret_enc), payload.code):
+        record_audit(
+            db, request, event_type='AUTH', action='MFA_ENABLE_FAILED',
+            entity='User', entity_id=user.id, user_id=user.id, outcome='failure',
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='That authenticator code is incorrect.')
+    user.mfa_enabled = True
+    db.commit()
+    record_audit(
+        db, request, event_type='AUTH', action='MFA_ENABLED',
+        entity='User', entity_id=user.id, user_id=user.id,
+    )
+    return {'message': 'Multi-factor authentication is enabled.'}
+
+
+@router.post('/mfa/disable', dependencies=[Depends(require_csrf)])
+def disable_mfa(
+    payload: MfaDisableRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    if not verify_password(user.password_hash, payload.password):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Password is incorrect.')
+    if not user.mfa_enabled or not _verify_second_factor(db, user, payload.code, request):
+        record_audit(
+            db, request, event_type='AUTH', action='MFA_DISABLE_FAILED',
+            entity='User', entity_id=user.id, user_id=user.id, outcome='failure',
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='That second-factor code is incorrect.')
+
+    user.mfa_enabled = False
+    user.mfa_secret_enc = None
+    db.query(RecoveryCode).filter(RecoveryCode.user_id == user.id).delete(synchronize_session=False)
+    db.commit()
+    record_audit(
+        db, request, event_type='AUTH', action='MFA_DISABLED',
+        entity='User', entity_id=user.id, user_id=user.id,
+    )
+    return {'message': 'Multi-factor authentication is disabled.'}
+
+
+@router.post(
+    '/mfa/complete',
+    response_model=LoginResponse,
+    dependencies=[Depends(require_safe_origin)],
+)
+def complete_mfa(
+    payload: MfaChallengeRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> LoginResponse:
+    limit_key = f'mfa:ip:{client_ip(request) or "unknown"}'
+    rate_limiter.check(limit_key, 5, settings.login_attempt_window_minutes * 60)
+
+    challenge = validate_token(db, payload.challenge_token, 'mfa_challenge')
+    user = db.query(User).filter(User.id == challenge.user_id, User.active.is_(True)).first()
+    if not user or not user.mfa_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='This challenge is invalid. Sign in again.')
+
+    if not _verify_second_factor(db, user, payload.code, request):
+        rate_limiter.record(limit_key)
+        record_audit(
+            db, request, event_type='AUTH', action='MFA_VERIFY_FAILED',
+            entity='User', entity_id=user.id, user_id=user.id, outcome='failure',
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Incorrect second-factor code.')
+
+    consume_token(db, payload.challenge_token, 'mfa_challenge')
+    csrf_token, expires_at = create_session(db, request, response, user)
+    rate_limiter.clear(f'login:user:{user.username}')
+    record_audit(
+        db, request, event_type='AUTH', action='LOGIN_SUCCESS',
+        entity='User', entity_id=user.id, user_id=user.id,
+        details='Password and second factor verified',
+    )
+    return LoginResponse(
+        user=UserResponse.model_validate(user),
+        csrf_token=csrf_token,
+        session_expires_at=expires_at,
+    )
