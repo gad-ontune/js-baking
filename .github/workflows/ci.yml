@@ -64,6 +64,8 @@ jobs:
           .venv/bin/alembic upgrade head
           .venv/bin/alembic current
           .venv/bin/alembic check
+      - name: Validate Docker Compose definition
+        run: docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet
 
   secret-scan:
     name: Gitleaks

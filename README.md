@@ -44,6 +44,10 @@ npm run build
 npm run preview
 ```
 
+`npm run preview` is only a local preview of the built SPA. For a deployed
+stack, use the Docker Compose setup below so the API, database and cache run
+with production settings.
+
 ---
 
 ## What is included
@@ -146,6 +150,11 @@ src/
     settings/
   App.jsx           Routes and permission guards
   main.jsx          App entry point
+backend/
+  app/              FastAPI routers, RBAC, audit chain, MFA, email and rate limiting
+  migrations/       Alembic revisions (schema authority for PostgreSQL)
+  scripts/          Owner bootstrap, demo seeding, audit-chain verification
+deploy/             Dockerfiles, nginx configuration and demo environment template
 ```
 
 Authentication, the account directory, audit records **and all business collections** come from the FastAPI backend through `src/lib/api.js`. The SPA hydrates inventory, movements, suppliers, products, purchases, sales, expenses and production from `GET /business/snapshot` and performs every write through the business endpoints; it never computes totals, stock levels, references or reversal state itself. `localStorage` under `js-baking-house-v3` is now only an offline fallback for unauthenticated demo browsing. Route guards use `src/lib/permissions.js`, which mirrors the backend role map, but the backend remains the only authority for whether an action is allowed. No password is stored in browser storage.
@@ -185,8 +194,8 @@ backend/.venv/bin/python -m uvicorn backend.app.main:app --port 8000
 backend/.venv/bin/python backend/scripts/seed_demo.py
 
 # Or create a real first owner from environment-only credentials
-cp backend/.env.example backend/.env      # then edit it, never commit it
-SEED_OWNER_USERNAME=... SEED_OWNER_PASSWORD=... \
+# (no password is ever stored in the repository or the browser)
+SEED_OWNER_USERNAME=... SEED_OWNER_PASSWORD=... SEED_OWNER_EMAIL=... \
   backend/.venv/bin/python backend/scripts/create_owner.py
 
 # Verify everything
@@ -194,6 +203,17 @@ npm run verify && npm run verify:backend
 ```
 
 The API exposes `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/change-password`, `GET /api/v1/auth/me`, owner-only user management under `/api/v1/users`, a read-only `/api/v1/audit`, `/health`, and the business API under `/api/v1/business`.
+
+Recovery and verification endpoints:
+
+- `POST /auth/forgot-password` — owner-only; verifies username **and** registered email, then emails a single-use code (SMTP required in production).
+- `POST /auth/reset-password` — exchanges a one-time code for a new password and revokes all sessions.
+- `POST /users/{id}/reset-token` — owner issues a one-time code for a staff/manager account; passwords are never displayed because only Argon2id hashes exist.
+- `POST /auth/email/verification-code` and `POST /auth/email/verify` — verify an account email with a single-use code.
+- `POST /auth/mfa/setup`, `/mfa/enable`, `/mfa/disable`, `/mfa/complete` — TOTP enrolment and challenge login with hashed one-time recovery codes.
+- `GET /audit/verify` — recomputes the append-only audit hash chain (owner only).
+
+Generic responses are used for unknown accounts so the recovery endpoint cannot be used to enumerate users. In production, unconfigured SMTP or MFA encryption fails closed instead of silently issuing unusable codes.
 
 Business endpoints:
 
@@ -205,10 +225,80 @@ Business endpoints:
 
 Staff may only update or reverse records they created; managers and owners may act on any record. A 404 is returned for another user's record so its existence is not disclosed. Authentication uses Argon2id hashes and server-managed HttpOnly cookies with double-submit CSRF tokens; there is no JWT and no credential in `localStorage` on the backend side. The SPA sends `credentials: 'include'` and copies only the CSRF cookie into a header.
 
-See `SECURITY_ASSESSMENT.md` for the full audit, implementation record, test results, remaining gaps and deployment configuration. **This is not a production-ready system**; MFA, PostgreSQL, backup/restore, HTTPS deployment and independent assurance are still outstanding.
+## Deployment with Docker Compose
+
+The stack serves the built SPA from an unprivileged nginx container and proxies
+`/api` to the FastAPI container on the **same origin**, so session cookies stay
+first-party. PostgreSQL and Redis are on an internal network and are not
+published to the host. Both application images run as a non-root user.
+
+```bash
+# 1. Configure the deployment (all secrets come from .env, never from source)
+cp .env.example .env
+#    - set POSTGRES_PASSWORD and REDIS_PASSWORD (URL-safe letters/digits)
+#    - set CORS_ORIGINS and FRONTEND_URL to the public HTTPS origin
+#    - set SMTP_HOST/SMTP_FROM (and credentials if required) for recovery emails
+#    - generate MFA_ENCRYPTION_KEY:
+#      python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+#    - optionally set SEED_OWNER_* once to bootstrap the first real owner
+
+# 2. Build and start
+docker compose up --build -d
+
+# 3. Open the site at the origin configured in CORS_ORIGINS, then sign in
+#    with the owner you bootstrapped or created through the API.
+
+# Useful follow-ups
+docker compose logs -f backend
+docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+docker compose exec backend alembic current
+docker compose exec backend python backend/scripts/verify_audit_chain.py
+docker compose down          # stop without deleting data volumes
+```
+
+Schema changes are owned by Alembic: the backend entrypoint runs
+`alembic upgrade head` before any worker starts, and `AUTO_CREATE_SCHEMA=false`
+prevents the API from creating or altering tables at runtime. Back up the
+`pgdata` volume with your normal encrypted backup tooling and rehearse a restore
+before relying on it.
+
+### Docker demo (clean local setup)
+
+The public demo credentials are disabled in the production stack. To spin up a
+complete demo with data and development one-time codes:
+
+```bash
+cp deploy/demo.env.example .env
+docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+# open http://localhost:8080
+```
+
+`docker compose ... down -v` removes the demo volumes. The demo seeder only
+creates accounts that do not exist and never overwrites an existing dataset;
+owners can also restore the original business records from **Settings → Audit**
+via the owner-only, CSRF-protected demo reset endpoint (disabled in production).
+
+### Verification commands
+
+```bash
+npm run verify             # frontend tests, lint, production build, npm audit
+npm run verify:backend     # backend tests, pip-audit, Bandit
+cd backend && alembic upgrade head && alembic check
+# Validate the compose definition (requires .env, or use the demo env template)
+docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet
+```
+
+CI runs all of these on every push, plus Gitleaks secret scanning and Semgrep
+static analysis.
+
+`SECURITY_ASSESSMENT.md` contains the full audit, implementation record, test
+results and residual gaps. Deployment is built and smoke-tested, but encrypted
+backup/restore rehearsal, TLS/WAF configuration in a real environment, Argon2
+benchmarking on target hardware and independent ASVS review remain before this
+should be described as production-hardened.
 
 The visual identity is built with typography, colour and inline icons. Small PNG icons in `public/` are used only for PWA installation and device notifications.
 
 ---
 
-**Version:** 1.0 · **Default currency:** KES · **Status:** Client review build + API-backed authentication/RBAC and server-enforced business records
+**Version:** 1.0 · **Default currency:** KES · **Status:** API-backed application with RBAC, MFA, recovery, audit chaining, Alembic and a Docker Compose deployment stack

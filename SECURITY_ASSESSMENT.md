@@ -5,6 +5,10 @@
 **Target:** OWASP ASVS 5.0.0 Level 2, OWASP API Security Top 10  
 **Scope:** Current repository as inspected before security implementation.
 
+Sections 1–5 record the original assessment; sections 6–10 record the phased
+remediation in chronological order. **Section 11 is the current status** and
+supersedes the "not implemented" statements in the earlier sections.
+
 ---
 
 ## 1. Architecture found
@@ -237,9 +241,14 @@ No backup job, encrypted off-server storage, retention policy, integrity check, 
 
 ## 5. Controls not yet implemented
 
-MFA, password reset, TOTP recovery codes, server-side session revocation, CSRF tokens, object-level authorization, PostgreSQL persistence, encrypted backups, production security headers, WAF, and independent penetration testing are all **not implemented** at assessment time.
+At assessment time, MFA, password reset, TOTP recovery codes, server-side session
+revocation, CSRF tokens, object-level authorization, PostgreSQL persistence,
+encrypted backups, production security headers, WAF and independent penetration
+testing were all **not implemented**. Most of these have since been implemented;
+see section 11 for the authoritative current status.
 
-No production compliance claim is made. This section records the initial assessment; current status is recorded in sections 6–8.
+No production compliance claim is made. This section records the initial
+assessment; implementation progress follows in sections 6–11.
 
 ---
 
@@ -315,7 +324,7 @@ No production compliance claim is made. This section records the initial assessm
 
 ### 8.1 Features implemented and verified
 
-Authentication (Argon2id, generic errors, rate limiting, active-user checks), server-managed sessions with idle/absolute expiry and revocation, CSRF plus origin validation, backend RBAC with deny-by-default, strict request schemas, append-only audit records, CORS allowlist, security headers, body-size limits, safe error handling, owner bootstrap without committed secrets, frontend hygiene from Phase 1, API-backed authentication, RBAC, user management, password change and audit viewing in the SPA (Phase 3), and server-enforced business records with strict edge validation, server-computed stock/totals, object-level authorization and reversal-only cancellation (Phase 4).
+Authentication (Argon2id, generic errors, rate limiting, active-user checks), server-managed sessions with idle/absolute expiry and revocation, CSRF plus origin validation, backend RBAC with deny-by-default, strict request schemas, append-only audit records, CORS allowlist, security headers, body-size limits, safe error handling, owner bootstrap without committed secrets, frontend hygiene from Phase 1, API-backed authentication, RBAC, user management, password change and audit viewing in the SPA (Phase 3), and server-enforced business records with strict edge validation, server-computed stock/totals, object-level authorization and reversal-only cancellation (Phase 4). Email verification, owner-controlled recovery, MFA, Redis rate limiting, audit hash chaining, PostgreSQL/Alembic, CI and the Docker Compose deployment were added afterwards and are documented in section 11.
 
 ### 8.2 Files created or modified
 
@@ -335,8 +344,8 @@ Authentication (Argon2id, generic errors, rate limiting, active-user checks), se
 - `backend/tests/test_demo_seed.py` — 3 tests covering demo password policy, production refusal and idempotent seeding.
 - `backend/tests/test_business.py` — 16 business API tests covering role-filtered snapshots, strict schema validation, object-level ownership (staff cannot act on another user's records), server-computed stock/totals, negative-stock rejection, reversal-only cancellation, supplier payments and audit events.
 - `backend/tests/test_business_seed.py` — 1 test confirming the demo business seeder produces consistent, non-negative inventory and valid sales.
-- Total: **73 automated tests** (19 frontend + 54 backend), all passing.
-- Backend tests deliberately do not exercise MFA, password reset or backup restoration because those controls do not exist yet.
+- Total at the end of Phase 4: **73 automated tests** (19 frontend + 54 backend), all passing.
+- MFA, recovery, Redis and audit-chain tests were added later; current totals and commands are in section 11. Backup restoration is still a manual step.
 
 ### 8.5 Vulnerabilities resolved
 
@@ -344,34 +353,40 @@ Plaintext backend credential storage; client-only authentication; client-only au
 
 ### 8.6 Remaining vulnerabilities and explicit gaps
 
-| Gap | Status | Impact |
+Status at the end of Phase 4 (superseded by section 11):
+
+| Gap | Status at Phase 4 | Current status |
 |---|---|---|
-| SPA authentication, RBAC, users, audit and business records are API-backed | **Implemented and verified (Phases 3–4)** | Backend enforces sign-in, roles, sessions, user changes, audit reads and all business collections for the UI. `localStorage` is only an offline fallback for unauthenticated demo browsing; authenticated writes go through the API and re-hydrate from the server snapshot. |
-| MFA/TOTP, recovery codes, MFA recovery | **Not implemented** | Owner/admin accounts lack a second factor. |
-| Password reset workflow | **Not implemented** | No token-based recovery, rate-limited reset or session invalidation on reset. |
-| PostgreSQL, migrations, least-privilege DB role, connection encryption | **Not implemented** | Default is local SQLite for development only. |
-| Encrypted backups, off-server storage, restore drill | **Not implemented** | No RPO/RTO can be demonstrated. |
-| Object-level authorization and transactional integrity for business records | **Implemented and verified (Phase 4)** | Business endpoints enforce per-record ownership: staff may only update/reverse records they created; managers/owners may act on any record. Financial totals, references, reversal state and stock deltas are server-computed inside a transaction. See section 10. |
-| Shared rate limiter for multi-worker deployments | **Partially implemented** | In-memory limiter is per process; use Redis in production. |
-| HTTPS/TLS termination and trusted-proxy configuration | **Not implemented** | `COOKIE_SECURE` and HSTS must be enabled at the edge. |
-| Audit hash chaining, anomaly alerting, WAF | **Not implemented** | Priority 2 hardening. |
-| 2 moderate React Router advisories | **Open, documented** | Requires a tested breaking upgrade to `react-router-dom@7.18.6`. |
-| Argon2 work-factor benchmarking | **Pending manual step** | Parameters are conservative defaults, not calibrated on target hardware. |
-| Gitleaks and Semgrep scans | **Not executed** | Recommended additional repository scanning. |
-| Independent ASVS Level 2 review and penetration testing | **Not executed** | Required before production release. |
+| SPA authentication, RBAC, users, audit and business records are API-backed | Implemented and verified (Phases 3–4) | Unchanged. `localStorage` is only an offline fallback for unauthenticated demo browsing; authenticated writes go through the API and re-hydrate from the server snapshot. |
+| MFA/TOTP, recovery codes | Not implemented | **Implemented and verified (section 11).** |
+| Password reset workflow | Not implemented | **Implemented and verified (section 11).** Owner-controlled, with single-use tokens and session revocation. |
+| PostgreSQL, migrations | Not implemented | **Implemented and verified (section 11).** Alembic owns the schema; SQLite remains the local development default. |
+| Least-privilege DB role, connection encryption | Not implemented | **Partial.** Stack uses a dedicated DB account on an internal network; TLS/role review is still a manual deployment task. |
+| Encrypted backups, off-server storage, restore drill | Not implemented | **Still open.** No RPO/RTO can be demonstrated. |
+| Object-level authorization and transactional integrity for business records | Implemented and verified (Phase 4) | Unchanged. See section 10. |
+| Shared rate limiter for multi-worker deployments | Partially implemented (in-memory, per process) | **Implemented and verified (section 11).** Redis-backed and fail-closed when unavailable. |
+| HTTPS/TLS termination and trusted-proxy configuration | Not implemented | **Partial.** nginx sends HSTS and overwrites `X-Forwarded-For` with the direct peer; real TLS/WAF termination is deployment-specific and still open. |
+| Audit hash chaining, anomaly alerting, WAF | Not implemented | **Partially implemented (section 11).** Hash chain verified; anomaly alerting and WAF remain open. |
+| 2 moderate React Router advisories | Open, documented | **Resolved.** Upgraded to `react-router-dom@7.18.6`; `npm audit` reports 0 vulnerabilities. |
+| Argon2 work-factor benchmarking | Pending manual step | **Still pending.** Parameters are conservative defaults, not calibrated on target hardware. |
+| Gitleaks and Semgrep scans | Not executed | **CI gates added (section 11)** on every push and pull request. |
+| Independent ASVS Level 2 review and penetration testing | Not executed | **Still open.** Required before production release. |
 
 **No production-ready or compliant claim is made.** The application is production-*conscious*, not production-*ready*.
 
 ### 8.7 Configuration required for deployment
 
-1. Copy `backend/.env.example` to `backend/.env`; set `DATABASE_URL` to a restricted PostgreSQL account, `CORS_ORIGINS` to the exact frontend origin, `ENVIRONMENT=production`, `COOKIE_SECURE=true`, and a suitable `COOKIE_SAMESITE`.
-2. Benchmark and set Argon2 parameters for the deployment hardware; tune session lifetimes to policy.
-3. Create the first owner with `backend/scripts/create_owner.py` using environment-supplied credentials stored in a secret manager. Never commit `.env`.
-4. Terminate HTTPS at a reverse proxy, redirect HTTP, and ensure the proxy does not strip the security headers or overwrite HSTS.
-5. Only trust `X-Forwarded-For` from the known proxy; otherwise restrict audit IP capture.
-6. Create a dedicated database role without `UPDATE`/`DELETE` on `audit_logs`, and disable public database access.
-7. Configure encrypted daily backups with 14-day/8-week/12-month retention and complete a documented restore test.
-8. Run `npm run verify`, `npm run verify:backend`, Gitleaks and Semgrep in CI before each release.
+The deployment is now defined in `docker-compose.yml` with `.env.example`; the
+steps below describe that stack. See section 11 and `README.md` for commands.
+
+1. Copy `.env.example` to `.env`; set `POSTGRES_PASSWORD`, `REDIS_PASSWORD` (URL-safe characters), `CORS_ORIGINS`/`FRONTEND_URL` to the exact public HTTPS origin, `ENVIRONMENT=production`, `COOKIE_SECURE=true` and a suitable `COOKIE_SAMESITE`.
+2. Set `SMTP_HOST`, `SMTP_FROM` and credentials if required, or owner recovery and email verification fail closed in production. Set `MFA_ENCRYPTION_KEY` (32 random bytes, URL-safe base64) or MFA setup returns 503.
+3. Benchmark and set Argon2 parameters for the deployment hardware; tune session lifetimes to policy.
+4. Bootstrap the first owner once with `SEED_OWNER_*` in the environment (the backend entrypoint calls `create_owner.py`), using a secret manager. Never commit `.env`.
+5. Terminate HTTPS at a trusted edge in front of nginx, redirect HTTP, and confirm that proxy does not strip the security headers or overwrite HSTS. nginx already overwrites `X-Forwarded-For` with the direct peer and does not publish PostgreSQL or Redis to the host.
+6. Review the dedicated database role so the API account cannot `UPDATE`/`DELETE` `audit_logs`, and keep database access private.
+7. Configure encrypted daily backups of the `pgdata` volume with 14-day/8-week/12-month retention and complete a documented restore test.
+8. Run `npm run verify`, `npm run verify:backend`, `alembic upgrade head && alembic check`, Docker Compose config validation, Gitleaks and Semgrep in CI before each release (all are configured in `.github/workflows/ci.yml`).
 
 ### 8.8 Controls requiring manual verification
 
@@ -380,9 +395,12 @@ Plaintext backend credential storage; client-only authentication; client-only au
 - Database role privileges and audit-table immutability.
 - Backup restoration and recovery-time measurement.
 - Argon2 calibration and login latency under expected load.
-- Behaviour of the in-memory rate limiter with multiple application workers.
+- TLS/WAF configuration and trusted-proxy setup in a real environment.
 - Full OWASP ASVS 5.0.0 Level 2 review and authorised penetration testing.
-- MFA, password reset and backup/restore controls once implemented.
+
+The following were manual items at Phase 4 but have since been smoke-tested:
+Redis-backed rate limiting with multiple workers, MFA challenge login, and
+owner-issued password reset (section 11). Backup/restore remains manual.
 
 ---
 
@@ -453,4 +471,90 @@ The SPA hydrates all collections from `GET /business/snapshot` and performs ever
 
 ### 10.4 Residual risk
 
-Backend business enforcement is now in place, but the deployment and assurance controls in sections 8.6–8.8 still apply: SQLite development storage rather than PostgreSQL, no encrypted backups or restore drill, no HTTPS/WAF configuration, in-process rate limiting, no Argon2 benchmarking, and no independent ASVS review or penetration testing. MFA and password reset remain unimplemented. **No production-ready or compliant claim is made.**
+Backend business enforcement is now in place. The deployment and assurance
+controls listed in sections 8.6–8.8 were still open at this phase; section 11
+records which of them have since been implemented and smoke-tested
+(PostgreSQL/Alembic, Redis, MFA, recovery, CI and Docker Compose) and which
+remain open (backups/restore, TLS/WAF, Argon2 benchmarking and independent
+ASVS review). **No production-ready or compliant claim is made.**
+
+---
+
+## 11. Current status — recovery, MFA and deployment assurance
+
+**Status:** implemented and verified locally and in a fresh Docker Compose
+stack. This is the authoritative status section and supersedes the stale
+"not implemented" statements in sections 5, 8.6 and 10.4.
+
+### 11.1 Controls added after Phase 4
+
+| Control | Implementation | Verification |
+|---|---|---|
+| Real email delivery and verification | `backend/app/email.py` and `backend/app/routers/auth.py`: SMTP (configurable host/port/TLS/credentials) sends single-use verification and recovery codes; `FRONTEND_URL` builds links. Production fails closed with 503 if SMTP is unconfigured. | `test_recovery.py`; live demo issued codes (email delivery disabled in the demo overlay) |
+| Owner-controlled password recovery | `POST /auth/forgot-password` verifies username **and** registered email and returns a generic response; `POST /auth/reset-password` exchanges a single-use, expiring token, enforces the password policy and revokes all sessions. Passwords are never displayed — Argon2id hashes only. | `test_recovery.py` (7 tests) |
+| Staff reset tokens | `POST /users/{id}/reset-token` is owner-only and issues a one-time code for a staff/manager account. Development may display it once in the UI (`dev_token`); production hides it unless `JSBH_SHOW_DEV_TOKENS=true`. | `test_recovery.py`; live stack issued and redeemed a code for `brian` |
+| Email verification | `POST /auth/email/verification-code` / `POST /auth/email/verify` use single-use codes; verification state is recorded on the user. | `test_recovery.py` |
+| MFA / TOTP | `backend/app/mfa.py` and `/auth/mfa/*`: authenticator secret encrypted with a server-side Fernet key (`MFA_ENCRYPTION_KEY`), ten hashed single-use recovery codes, short-lived login challenge before a session is created (no session is issued before the second factor). Setup returns 503 in production without the key. | `test_mfa.py` (5 tests); live setup → enable → challenge → complete flow |
+| Shared rate limiting | `backend/app/ratelimit.py`: Redis-backed limiter when `REDIS_URL` is set, otherwise in-memory for local development; fails closed with 503 if configured Redis is unavailable. nginx overwrites `X-Forwarded-For` with the direct peer. | `test_ratelimit.py` (3 tests); live stack returned 401 ×5 then 429 on the sixth failed login |
+| Tamper-evident audit chain | `backend/app/audit.py`: append-only records include `previous_hash` and `record_hash`; `GET /audit/verify` (owner) and `backend/scripts/verify_audit_chain.py` recompute the chain. | `test_audit_chain.py` (3 tests); live chain `{"valid":true,"checked":126}` |
+| PostgreSQL with Alembic | `AUTO_CREATE_SCHEMA=false` in deployments; entrypoint runs `alembic upgrade head` before any worker starts. Initial schema + revisions in `backend/migrations/versions/`. SQLite remains the development default. | `alembic upgrade head && alembic check` clean on SQLite and on the PostgreSQL stack |
+| Prefixed ID width fix | Revision `22c4d8441b51` widens all prefixed ID/foreign-key columns (users, sessions, business records, audit, tokens, recovery codes) from `VARCHAR(36)` to `String(64)`; SQLite silently accepted the too-short values while PostgreSQL rejected them. | `test_config.py::test_id_columns_fit_prefixed_identifiers_on_strict_databases`; fresh PostgreSQL seed produced 126 audit records and the full business snapshot |
+| Dependency currency | Upgraded to `react-router-dom@7.18.6` (routes migrated to React Router v7) and current FastAPI/Starlette; no known npm or pip advisories. | `npm audit` 0 vulnerabilities; `pip-audit` clean |
+| CI gates | `.github/workflows/ci.yml` runs frontend tests/lint/build/npm audit, backend tests/pip-audit/Bandit, Alembic `upgrade head && check`, Gitleaks (`.gitleaks.toml`) and Semgrep (`.semgrep.yml`) on every push and pull request. | Workflow pushed to `main` |
+| Docker Compose deployment | `deploy/backend.Dockerfile` (non-root UID 10001, `PYTHONPATH=/app`), `deploy/frontend.Dockerfile` (unprivileged nginx), `deploy/nginx.conf` (same-origin `/api` proxy, `/tmp/nginx.pid`, hidden-dot deny), `deploy/nginx-headers.conf` (CSP, HSTS, COOP/CORP), `docker-compose.yml` (PostgreSQL + Redis on an internal network, health checks), `docker-compose.demo.yml` for local demo. | Full stack built from fresh volumes; all containers healthy; smoke tests below |
+
+Three bugs surfaced and were fixed during the Docker smoke test: PostgreSQL
+`StringDataRightTruncation` on prefixed IDs, `ModuleNotFoundError: No module
+named 'backend'` under uvicorn workers, and nginx failing to create
+`/var/run/nginx.pid` as an unprivileged user. Each has a configuration/code fix
+and, for the ID bug, a regression test.
+
+### 11.2 Verification executed
+
+- `npm run verify` — **21 frontend tests**, lint, production build and `npm audit --audit-level=high` pass; **0 npm vulnerabilities**.
+- `npm run verify:backend` — **78 backend tests**, `pip-audit` and Bandit pass.
+- `cd backend && alembic upgrade head && alembic check` — **No new upgrade operations detected**.
+- `docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet` — valid. The production `docker compose config` correctly fails closed when the required `POSTGRES_PASSWORD`/`REDIS_PASSWORD` are absent, so CI validates with the demo template.
+- Fresh-volume Docker demo smoke test through nginx on port 8080:
+  - `/health` returned `{"status":"ok"}`; SPA root returned 200 with the JS Baking House title; CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy, COOP and CORP headers present; `index.html` sent `Cache-Control: no-store`.
+  - Owner login returned a user and CSRF token; `/auth/me` confirmed the registered email; snapshot returned `inventory=18, movements=101, suppliers=5, products=8, purchases=10, sales=40, expenses=18, production=15`.
+  - Audit verification returned `{"valid":true,"checked":126,"first_invalid_sequence":null}` before and after the full smoke test.
+  - Owner issued a one-time reset code for `brian`, redeemed it, the old password returned 401 and the new password logged in.
+  - MFA enrolment produced a 32-character secret and 10 recovery codes; enabling MFA made the next login return a challenge; the challenge completed and created a session. PostgreSQL stored the secret as `gAAAAABq...` (140 chars) with 10 recovery-code hashes, confirming encryption at rest.
+  - Redis limiter returned 401 for five bad logins and 429 on the sixth.
+
+### 11.3 Commands
+
+```bash
+# Local demo (public throwaway credentials, dev codes visible once)
+cp deploy/demo.env.example .env
+docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+# open http://localhost:8080
+
+# Production-shaped stack (secrets from .env, no demo seed)
+cp .env.example .env   # then fill in the required values
+docker compose up --build -d
+
+# Verification
+npm run verify && npm run verify:backend
+cd backend && alembic upgrade head && alembic check
+docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet
+```
+
+### 11.4 Residual gaps
+
+- Encrypted backups of `pgdata`, off-server storage and a rehearsed restore
+  drill (no RPO/RTO can be demonstrated).
+- TLS/WAF termination, HTTP→HTTPS redirect and trusted-proxy configuration in
+  a real environment (nginx currently serves HTTP on 8080 behind the stack).
+- Least-privilege database role review, including denying `UPDATE`/`DELETE` on
+  `audit_logs` to the API account.
+- Argon2 work-factor benchmarking on the target hardware.
+- Audit anomaly alerting and WAF rules.
+- Independent OWASP ASVS 5.0.0 Level 2 review and authorised penetration
+  testing.
+
+**No production-ready, hardened or compliant claim is made.** The stack is
+built and smoke-tested, and the controls above are implemented with automated
+and live verification, but the residual gaps require operator action and
+independent assurance before production use.
