@@ -115,10 +115,10 @@ The shell is fully responsive: a collapsible sidebar on desktop and a slide-out 
 
 ### Notification centre and device notifications
 
-The bell menu and the dedicated **Notifications** page share one live inbox:
+The bell icon in the top bar opens the dedicated **Notifications** page, which is also available from the sidebar. Both use one live inbox:
 
 - Open alerts are derived from the authoritative business snapshot whenever stock or expiry status changes.
-- The notification provider owns the sync, so the bell menu and the dedicated page never depend on one screen being open.
+- The notification provider owns the sync, so alerts stay current whether or not the notification centre is open.
 - Read/resolved state is stored per signed-in user; another account's inbox is never inherited.
 - Each notification has a read/unread state, severity, timestamp and related page.
 - Use **Mark all as read**, per-item read/unread toggles, dismiss, clear-read and clear-all actions.
@@ -128,7 +128,7 @@ The bell menu and the dedicated **Notifications** page share one live inbox:
 
 Device delivery uses the built-in Notification API through a registered service worker, so new alerts can appear in the device notification centre even when the app tab is in the background. Clicking a device notification opens the relevant page (or the notification centre).
 
-1. Open the bell menu or the Notifications page.
+1. Open the Notifications page from the bell icon or the sidebar.
 2. Click **Enable device alerts** and allow access when prompted.
 3. Optionally install the app to the device home screen from the browser menu for an app-like experience.
 4. Click **Send test** to confirm that a notification arrives on the device.

@@ -4,7 +4,6 @@ import {
   Apple,
   ArrowUpRight,
   Bell,
-  BellRing,
   Boxes,
   ChartNoAxesCombined,
   ChevronLeft,
@@ -33,15 +32,8 @@ import {
 import { useStore } from '../lib/store'
 import { periodLabel } from '../lib/analytics'
 import { formatDate } from '../lib/format'
-import { safeInternalPath } from '../lib/security'
 import { useNotifications } from '../lib/notificationCenter'
-import {
-  notificationPermission,
-  notificationsSupported,
-  requestNotificationPermission,
-  sendTestDeviceNotification,
-} from '../lib/deviceNotifications'
-import { Avatar, Badge, Button } from './ui'
+import { Avatar } from './ui'
 
 const NAV_GROUPS = [
   {
@@ -198,114 +190,6 @@ function Sidebar({ collapsed, onToggle, onNavigate, mobile = false, onClose }) {
   )
 }
 
-function NotificationsPanel({ onClose }) {
-  const { data, notify } = useStore()
-  const { active, unreadCount, criticalCount, markAllRead, markRead, addNotification } = useNotifications()
-  const navigate = useNavigate()
-  const [permission, setPermission] = useState(notificationPermission)
-  const [requesting, setRequesting] = useState(false)
-
-  const enable = async () => {
-    setRequesting(true)
-    const result = await requestNotificationPermission()
-    setPermission(result)
-    setRequesting(false)
-    notify(
-      result === 'granted' ? 'Device notifications enabled.' : 'Notification permission was not granted.',
-      result === 'granted' ? 'success' : 'error',
-    )
-  }
-
-  const test = async () => {
-    addNotification({
-      title: 'Test notification',
-      detail: 'Your notification centre is working. Device alerts open this page when clicked.',
-      severity: 'info',
-      type: 'system',
-    })
-    if (permission === 'granted') await sendTestDeviceNotification(data.business.name)
-    notify('Test notification added to your inbox.')
-  }
-
-  const open = (item) => {
-    if (!item.read) markRead(item.id)
-    const destination = safeInternalPath(item.to, window.location.origin)
-    if (destination) navigate(destination)
-    onClose()
-  }
-
-  return (
-    <div className="absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-line bg-white p-2 shadow-lift">
-      <div className="flex items-center justify-between gap-2 px-3 py-2">
-        <p className="font-display text-base font-semibold">Notifications</p>
-        <div className="flex items-center gap-1.5">
-          <Badge tone={unreadCount ? 'red' : criticalCount ? 'amber' : 'leaf'}>{unreadCount ? `${unreadCount} unread` : 'All read'}</Badge>
-          <button type="button" onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-bakery-50" aria-label="Close notifications">
-            <X size={15} />
-          </button>
-        </div>
-      </div>
-
-      {notificationsSupported() ? (
-        <div className="mx-1 mb-2 rounded-xl border border-bakery-100 bg-bakery-50 p-3">
-          <div className="flex items-center gap-2">
-            <BellRing size={14} className="text-bakery-700" />
-            <p className="text-xs font-bold text-bakery-900">
-              {permission === 'granted' ? 'Device notifications on' : permission === 'denied' ? 'Device notifications blocked' : 'Get device notifications'}
-            </p>
-          </div>
-          <p className="mt-1 text-[11px] leading-relaxed text-bakery-800/80">
-            {permission === 'granted'
-              ? 'New stock alerts also appear in your device notification centre, even when this tab is in the background.'
-              : permission === 'denied'
-                ? 'Allow notifications for this site in your browser or device settings. In-app alerts still work.'
-                : 'Turn this on to receive new stock alerts on this device.'}
-          </p>
-          <div className="mt-2 flex gap-2">
-            {permission === 'default' && (
-              <Button size="sm" variant="primary" icon={BellRing} className="flex-1" onClick={enable} disabled={requesting}>
-                {requesting ? 'Waiting…' : 'Enable'}
-              </Button>
-            )}
-            {permission === 'granted' && <Button size="sm" className="flex-1" icon={BellRing} onClick={test}>Test alert</Button>}
-          </div>
-        </div>
-      ) : (
-        <p className="mx-1 mb-2 rounded-xl bg-slate-50 p-3 text-[11px] text-muted">
-          This browser does not support system notifications. In-app alerts still work.
-        </p>
-      )}
-
-      <div className="mb-1 flex items-center justify-between gap-2 px-3 py-1">
-        <button type="button" onClick={() => { navigate('/notifications'); onClose() }} className="text-xs font-bold text-bakery-700 hover:underline">
-          View all
-        </button>
-        <button type="button" onClick={markAllRead} disabled={!unreadCount} className="text-xs font-semibold text-muted hover:text-ink disabled:opacity-40">
-          Mark all as read
-        </button>
-      </div>
-
-      <div className="max-h-72 overflow-y-auto">
-        {active.slice(0, 6).map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => open(item)}
-            className={`flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-bakery-50 ${item.read ? '' : 'bg-bakery-50/60'}`}
-          >
-            <span className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${item.severity === 'critical' ? 'bg-red-500' : item.severity === 'warning' ? 'bg-amber-500' : 'bg-bakery-500'}`} />
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold text-ink">{item.title}</span>
-              <span className="block truncate text-xs text-muted">{item.detail}</span>
-            </span>
-          </button>
-        ))}
-        {!active.length && <p className="px-3 py-6 text-center text-sm text-muted">No notifications right now.</p>}
-      </div>
-    </div>
-  )
-}
-
 export default function Layout() {
   const { data, currentUser, signOut, touchSession } = useStore()
   const { unreadCount } = useNotifications()
@@ -313,12 +197,10 @@ export default function Layout() {
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [query, setQuery] = useState('')
 
   useEffect(() => {
-    setNotificationsOpen(false)
     setUserMenuOpen(false)
     setMobileOpen(false)
     touchSession()
@@ -374,22 +256,20 @@ export default function Layout() {
                 className="input w-48 py-2 pl-9 lg:w-64"
               />
             </form>
+            <button
+              type="button"
+              onClick={() => { navigate('/notifications'); setUserMenuOpen(false) }}
+              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-white text-ink transition hover:border-bakery-300"
+              aria-label="Open notification centre"
+              title="Notification centre"
+            >
+              <Bell size={18} />
+              {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+            </button>
             <div className="relative">
               <button
                 type="button"
-                onClick={() => { setNotificationsOpen((value) => !value); setUserMenuOpen(false) }}
-                className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-white text-ink transition hover:border-bakery-300"
-                aria-label="Notifications"
-              >
-                <Bell size={18} />
-                {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">{unreadCount > 9 ? '9+' : unreadCount}</span>}
-              </button>
-              {notificationsOpen && <NotificationsPanel onClose={() => setNotificationsOpen(false)} />}
-            </div>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => { setUserMenuOpen((value) => !value); setNotificationsOpen(false) }}
+                onClick={() => setUserMenuOpen((value) => !value)}
                 className="flex items-center gap-2 rounded-xl border border-line bg-white py-1.5 pl-1.5 pr-2.5 transition hover:border-bakery-300"
               >
                 <Avatar name={currentUser?.name || 'User'} size="sm" />
