@@ -77,3 +77,13 @@ def send_email_verification(to: str, token: str) -> bool:
         f'If you did not request this, you can safely ignore this message.\n'
     )
     return _send(to, 'Verify your email address', body)
+
+
+def send_security_alert(to: str, subject: str, lines: list[str]) -> bool:
+    """Send a plain-text security alert containing no tokens or credentials."""
+    body = (
+        f'{PRODUCT_NAME} security alert\n\n'
+        + '\n'.join(f'- {line}' for line in lines)
+        + '\n\nReview the audit log in the application for full context.\n'
+    )
+    return _send(to, subject, body)

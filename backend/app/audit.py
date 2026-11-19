@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .security import new_id, utc_now
 from .models import AuditLog
+from .alerting import alert_chain_failure, evaluate_event
 
 GENESIS_HASH = '0' * 64
 _CHAIN_FIELDS = (
@@ -83,6 +84,14 @@ def record_audit(
     db.add(entry)
     if commit:
         db.commit()
+        # Alert only after the event is durable; a rolled-back action must not
+        # notify operators. Imperative alerts never block the audited request.
+        try:
+            evaluate_event(db, entry)
+        except Exception:  # pragma: no cover - alerting must never break auditing
+            import logging
+
+            logging.getLogger('jsbh.alerts').exception('Audit alert evaluation failed')
     return entry
 
 
@@ -95,13 +104,15 @@ def verify_chain(db: Session) -> dict:
         .all()
     )
     expected_previous = GENESIS_HASH
-    for entry in entries:
+    for index, entry in enumerate(entries):
         if entry.previous_hash != expected_previous or entry.entry_hash != _compute_hash(expected_previous, entry):
-            return {
+            result = {
                 'valid': False,
-                'checked': entries.index(entry),
+                'checked': index,
                 'first_invalid_sequence': entry.sequence_number,
             }
+            alert_chain_failure(result)
+            return result
         expected_previous = entry.entry_hash
     return {
         'valid': True,

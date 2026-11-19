@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     # authenticator secrets at rest. Development derives a throwaway key.
     mfa_encryption_key: str = ''
 
+    # Security alerting. At least one destination must be configured to enable
+    # alerts. Webhooks must use HTTPS in production so alert contents are not
+    # sent in clear text.
+    alert_email_to: str = ''
+    alert_webhook_url: str = ''
+    alert_failed_login_threshold: int = 5
+    alert_window_minutes: int = 15
+    alert_cooldown_minutes: int = 30
+    audit_check_interval_minutes: int = 360
+
     seed_owner_username: str = ''
     seed_owner_password: str = ''
     seed_owner_email: str = ''
@@ -71,6 +81,12 @@ class Settings(BaseSettings):
         if normalized not in {'lax', 'strict', 'none'}:
             raise ValueError('COOKIE_SAMESITE must be lax, strict or none')
         return normalized
+
+    @model_validator(mode='after')
+    def validate_production_alert_transport(self):
+        if self.is_production and self.alert_webhook_url and not self.alert_webhook_url.startswith('https://'):
+            raise ValueError('ALERT_WEBHOOK_URL must use https in production')
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

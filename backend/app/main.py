@@ -1,13 +1,16 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .alerting import alerting_configured
+from .audit import verify_chain
 from .config import settings
-from .database import init_db
+from .database import SessionLocal, init_db
 from .routers import audit, auth, business, users
 
 logger = logging.getLogger('jsbh.api')
@@ -23,10 +26,33 @@ API_SECURITY_HEADERS = {
 }
 
 
+async def _audit_integrity_check_loop() -> None:
+    """Periodically verify the hash chain so tampering is not only found on demand."""
+    interval_seconds = max(1, settings.audit_check_interval_minutes) * 60
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            with SessionLocal() as db:
+                result = verify_chain(db)
+            if not result['valid']:
+                logger.error('Audit chain verification failed at sequence %s', result['first_invalid_sequence'])
+        except Exception:
+            logger.exception('Scheduled audit chain verification failed')
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
+    checker = None
+    if settings.is_production and alerting_configured():
+        checker = asyncio.create_task(_audit_integrity_check_loop())
+    try:
+        yield
+    finally:
+        if checker is not None:
+            checker.cancel()
+            with suppress(asyncio.CancelledError):
+                await checker
 
 
 def create_app() -> FastAPI:
