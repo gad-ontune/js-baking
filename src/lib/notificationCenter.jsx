@@ -1,51 +1,51 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { safeInternalPath } from './security'
+import { useStore } from './store'
+import { inventoryAlerts } from './analytics'
+import { fireDeviceNotification } from './deviceNotifications'
+import {
+  MAX_NOTIFICATIONS,
+  loadNotifications,
+  newNotificationId,
+  persistNotifications,
+  reconcileAlerts,
+} from './notificationInbox'
 
-const STORAGE_KEY = 'js-baking-house-notifications-v1'
-const MAX_NOTIFICATIONS = 100
 const NotificationContext = createContext(null)
 
-function loadNotifications() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    const parsed = raw ? JSON.parse(raw) : null
-    return Array.isArray(parsed)
-      ? parsed
-        .filter((item) => item?.id && item?.title && typeof item?.createdAt === 'string')
-        .map((item) => ({ ...item, to: safeInternalPath(item.to) || '/notifications' }))
-      : []
-  } catch {
-    return []
-  }
-}
-
-const newId = () => `note_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`
-
-const destinationFor = (alert) => {
-  if (alert.status === 'expiring' || alert.status === 'expired' || alert.status === 'warning') return '/inventory/expiry'
-  return '/inventory/low-stock'
-}
+const createInbox = (userId) => ({ userId, items: loadNotifications(userId) })
 
 /**
- * Shared notification inbox. Business alerts are synchronised from live data,
- * so read state survives reloads while open alerts stay up to date.
+ * Shared notification inbox. Alerts are derived from the authoritative business
+ * snapshot by the provider itself, so the bell and the dedicated page always
+ * see the same live data. Read/dismiss state is stored per signed-in user.
  */
 export function NotificationProvider({ children }) {
-  const [notifications, setNotifications] = useState(loadNotifications)
-  const notificationsRef = useRef(notifications)
+  const { currentUser, data, hydrated } = useStore()
+  const userId = currentUser?.id || 'anonymous'
+  const [inbox, setInbox] = useState(() => createInbox(userId))
+  const notificationsRef = useRef(inbox.items)
+  const devicePrimedRef = useRef(false)
 
-  const commit = useCallback((next) => {
-    notificationsRef.current = next
-    setNotifications(next)
-  }, [])
+  // Switching accounts must not leak one user's read/resolved state to another.
+  useEffect(() => {
+    setInbox((previous) => {
+      if (previous.userId === userId) return previous
+      const next = createInbox(userId)
+      notificationsRef.current = next.items
+      devicePrimedRef.current = false
+      return next
+    })
+  }, [userId])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(notifications))
-    } catch {
-      // Storage may be unavailable; the inbox still works for this session.
-    }
-  }, [notifications])
+    persistNotifications(inbox.userId, inbox.items)
+  }, [inbox])
+
+  const commit = useCallback((next) => {
+    const items = typeof next === 'function' ? next(notificationsRef.current) : next
+    notificationsRef.current = items
+    setInbox((previous) => ({ ...previous, items }))
+  }, [])
 
   /**
    * Reconcile live business alerts with the saved inbox and return only the
@@ -53,57 +53,9 @@ export function NotificationProvider({ children }) {
    */
   const syncAlerts = useCallback(
     (alerts) => {
-      if (!Array.isArray(alerts)) return []
-
-      const now = new Date().toISOString()
-      const existing = notificationsRef.current
-      const byId = new Map(existing.map((item) => [item.id, item]))
-      const activeIds = new Set()
-      const fresh = []
-
-      const synced = alerts.map((alert) => {
-        const id = `inventory:${alert.id}:${alert.status}`
-        activeIds.add(id)
-        const title = alert.item ? `${alert.title}: ${alert.item.name}` : alert.title
-        const current = byId.get(id)
-
-        if (current) {
-          return {
-            ...current,
-            title,
-            detail: alert.detail,
-            severity: alert.severity,
-            to: destinationFor(alert),
-            resolved: false,
-          }
-        }
-
-        const item = {
-          id,
-          type: 'inventory',
-          title,
-          detail: alert.detail,
-          severity: alert.severity,
-          to: destinationFor(alert),
-          itemId: alert.itemId,
-          createdAt: now,
-          read: false,
-          resolved: false,
-        }
-        fresh.push(item)
-        return item
-      })
-
-      const inactive = existing
-        .filter((item) => !activeIds.has(item.id))
-        .map((item) => (item.type === 'inventory' && !item.resolved ? { ...item, resolved: true } : item))
-
-      const next = [...synced, ...inactive]
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-        .slice(0, MAX_NOTIFICATIONS)
-
-      if (JSON.stringify(next) !== JSON.stringify(existing)) commit(next)
-      return fresh
+      const result = reconcileAlerts(notificationsRef.current, alerts)
+      if (result.changed) commit(result.items)
+      return result.fresh
     },
     [commit],
   )
@@ -111,7 +63,7 @@ export function NotificationProvider({ children }) {
   const addNotification = useCallback(
     ({ title, detail, severity = 'info', to = '/notifications', type = 'system' }) => {
       const item = {
-        id: newId(),
+        id: newNotificationId(),
         type,
         title,
         detail,
@@ -158,6 +110,40 @@ export function NotificationProvider({ children }) {
 
   const clearAll = useCallback(() => commit([]), [commit])
 
+  const alerts = useMemo(() => inventoryAlerts(data), [data])
+  const refreshAlerts = useCallback(() => syncAlerts(inventoryAlerts(data)), [data, syncAlerts])
+
+  // Keep the inbox in step with live inventory alerts. Device delivery is
+  // suppressed until the first server snapshot has been applied, so signing in
+  // never floods the device with historical demo alerts.
+  useEffect(() => {
+    const fresh = syncAlerts(alerts)
+    if (!hydrated) return
+    if (!devicePrimedRef.current) {
+      devicePrimedRef.current = true
+      return
+    }
+    if (!fresh.length) return
+
+    fresh.slice(0, 3).forEach((item) => {
+      fireDeviceNotification({
+        title: `${item.title} — ${data.business?.name || 'JS Baking House'}`,
+        body: item.detail,
+        tag: `alert-${item.id}`,
+        url: item.to,
+      })
+    })
+    if (fresh.length > 3) {
+      fireDeviceNotification({
+        title: `${fresh.length - 3} more alerts — ${data.business?.name || 'JS Baking House'}`,
+        body: 'Open the notification centre to review all open alerts.',
+        tag: 'alerts-summary',
+        url: '/notifications',
+      })
+    }
+  }, [alerts, data.business?.name, hydrated, syncAlerts, userId])
+
+  const notifications = inbox.items
   const active = useMemo(() => notifications.filter((item) => !item.resolved), [notifications])
   const unreadCount = active.filter((item) => !item.read).length
   const criticalCount = active.filter((item) => item.severity === 'critical').length
@@ -169,6 +155,7 @@ export function NotificationProvider({ children }) {
       unreadCount,
       criticalCount,
       syncAlerts,
+      refreshAlerts,
       addNotification,
       markRead,
       markUnread,
@@ -183,6 +170,7 @@ export function NotificationProvider({ children }) {
       unreadCount,
       criticalCount,
       syncAlerts,
+      refreshAlerts,
       addNotification,
       markRead,
       markUnread,

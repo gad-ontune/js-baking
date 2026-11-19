@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Apple,
@@ -31,12 +31,11 @@ import {
   X,
 } from 'lucide-react'
 import { useStore } from '../lib/store'
-import { inventoryAlerts, periodLabel } from '../lib/analytics'
+import { periodLabel } from '../lib/analytics'
 import { formatDate } from '../lib/format'
 import { safeInternalPath } from '../lib/security'
 import { useNotifications } from '../lib/notificationCenter'
 import {
-  fireDeviceNotification,
   notificationPermission,
   notificationsSupported,
   requestNotificationPermission,
@@ -309,7 +308,7 @@ function NotificationsPanel({ onClose }) {
 
 export default function Layout() {
   const { data, currentUser, signOut, touchSession } = useStore()
-  const { unreadCount, syncAlerts } = useNotifications()
+  const { unreadCount } = useNotifications()
   const location = useLocation()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
@@ -317,36 +316,6 @@ export default function Layout() {
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const alerts = useMemo(() => inventoryAlerts(data), [data])
-  const firstSyncRef = useRef(false)
-
-  // Keep the inbox in step with live inventory alerts. The first sync seeds the
-  // inbox without sending every demo alert to the device notification centre.
-  useEffect(() => {
-    const fresh = syncAlerts(alerts)
-    if (!firstSyncRef.current) {
-      firstSyncRef.current = true
-      return
-    }
-    if (!fresh.length) return
-
-    fresh.slice(0, 3).forEach((item) => {
-      fireDeviceNotification({
-        title: `${item.title} — ${data.business.name}`,
-        body: item.detail,
-        tag: `alert-${item.id}`,
-        url: item.to,
-      })
-    })
-    if (fresh.length > 3) {
-      fireDeviceNotification({
-        title: `${fresh.length - 3} more alerts — ${data.business.name}`,
-        body: 'Open the notification centre to review all open alerts.',
-        tag: 'alerts-summary',
-        url: '/notifications',
-      })
-    }
-  }, [alerts, data.business.name, syncAlerts])
 
   useEffect(() => {
     setNotificationsOpen(false)

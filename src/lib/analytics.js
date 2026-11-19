@@ -1,4 +1,4 @@
-import { addDays, daysUntil, inRange, itemStatus, periodRange, startOfDay } from './format'
+import { addDays, daysUntil, inRange, itemStatus, periodRange, startOfDay } from './format.js'
 
 const validSales = (data) => data.sales.filter((sale) => !sale.voided)
 const validExpenses = (data) => data.expenses.filter((expense) => !expense.reversed)

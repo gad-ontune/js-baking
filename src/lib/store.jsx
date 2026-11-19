@@ -41,6 +41,7 @@ export function StoreProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null)
   const [authStatus, setAuthStatus] = useState('loading')
   const [apiAvailable, setApiAvailable] = useState(true)
+  const [hydrated, setHydrated] = useState(false)
   const restoredRef = useRef(false)
 
   useEffect(() => {
@@ -53,12 +54,15 @@ export function StoreProvider({ children }) {
 
   /** Replace local demo collections with the authoritative server snapshot. */
   const hydrateBusiness = useCallback(async () => {
+    setHydrated(false)
     try {
       const snapshot = await api.businessSnapshot()
       setData((previous) => ({ ...previous, ...snapshot }))
     } catch {
       // Keep the local demo data when the API is unavailable or the session
       // has ended. The backend remains the authority whenever it responds.
+    } finally {
+      setHydrated(true)
     }
   }, [])
 
@@ -294,6 +298,7 @@ export function StoreProvider({ children }) {
       currentUser,
       authStatus,
       apiAvailable,
+      hydrated,
       can,
       signIn,
       completeMfa,
@@ -304,7 +309,7 @@ export function StoreProvider({ children }) {
       resetDemo,
       setDirectory,
     }),
-    [data, mutate, addAudit, businessWrite, hydrateBusiness, notify, toasts, dismissToast, currentUser, authStatus, apiAvailable, can, signIn, completeMfa, refreshUser, signOut, changePassword, touchSession, resetDemo, setDirectory],
+    [data, mutate, addAudit, businessWrite, hydrateBusiness, notify, toasts, dismissToast, currentUser, authStatus, apiAvailable, hydrated, can, signIn, completeMfa, refreshUser, signOut, changePassword, touchSession, resetDemo, setDirectory],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

@@ -117,10 +117,13 @@ The shell is fully responsive: a collapsible sidebar on desktop and a slide-out 
 
 The bell menu and the dedicated **Notifications** page share one live inbox:
 
-- Open alerts are synchronised from inventory data whenever stock or expiry status changes.
+- Open alerts are derived from the authoritative business snapshot whenever stock or expiry status changes.
+- The notification provider owns the sync, so the bell menu and the dedicated page never depend on one screen being open.
+- Read/resolved state is stored per signed-in user; another account's inbox is never inherited.
 - Each notification has a read/unread state, severity, timestamp and related page.
 - Use **Mark all as read**, per-item read/unread toggles, dismiss, clear-read and clear-all actions.
 - Filter by All / Unread / Read / Resolved and by severity, or search the inbox.
+- **Refresh from inventory** rebuilds the inbox from current data if you cleared it or want to re-sync.
 - Send a **Test** notification to confirm delivery before relying on stock alerts.
 
 Device delivery uses the built-in Notification API through a registered service worker, so new alerts can appear in the device notification centre even when the app tab is in the background. Clicking a device notification opens the relevant page (or the notification centre).
@@ -130,7 +133,7 @@ Device delivery uses the built-in Notification API through a registered service 
 3. Optionally install the app to the device home screen from the browser menu for an app-like experience.
 4. Click **Send test** to confirm that a notification arrives on the device.
 
-The first sync seeds existing demo alerts into the inbox without sending a burst of old alerts to the device. Only genuinely new alerts are delivered. Device notifications require a secure context (`localhost` or HTTPS); if permission is denied, the in-app inbox continues to work and the UI explains how to re-enable it.
+The first sync after the server snapshot loads seeds existing alerts into the inbox without sending a burst of historical alerts to the device. Only genuinely new alerts are delivered afterwards. Device notifications require a secure context (`localhost` or HTTPS); if permission is denied, the in-app inbox continues to work and the UI explains how to re-enable it.
 
 ---
 

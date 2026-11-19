@@ -8,6 +8,7 @@ import {
   CheckCheck,
   CircleAlert,
   Info,
+  RefreshCw,
   Send,
   Trash2,
   TriangleAlert,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../lib/store'
 import { useNotifications } from '../lib/notificationCenter'
+import { filterNotifications } from '../lib/notificationInbox'
 import {
   fireDeviceNotification,
   notificationPermission,
@@ -54,6 +56,7 @@ export default function Notifications() {
     markRead,
     markUnread,
     markAllRead,
+    refreshAlerts,
     dismissNotification,
     clearRead,
     clearAll,
@@ -65,18 +68,10 @@ export default function Notifications() {
   const [permission, setPermission] = useState(notificationPermission)
   const [requesting, setRequesting] = useState(false)
 
-  const visible = useMemo(() => {
-    let list = notifications
-    if (tab === 'resolved') list = list.filter((item) => item.resolved)
-    else if (tab === 'unread') list = list.filter((item) => !item.read && !item.resolved)
-    else if (tab === 'read') list = list.filter((item) => item.read && !item.resolved)
-    else list = list.filter((item) => !item.resolved)
-
-    if (severity !== 'all') list = list.filter((item) => item.severity === severity)
-    const term = query.trim().toLowerCase()
-    if (term) list = list.filter((item) => `${item.title} ${item.detail}`.toLowerCase().includes(term))
-    return list
-  }, [notifications, tab, severity, query])
+  const visible = useMemo(
+    () => filterNotifications(notifications, { tab, severity, query }),
+    [notifications, tab, severity, query],
+  )
 
   const enableDevice = async () => {
     setRequesting(true)
@@ -174,6 +169,7 @@ export default function Notifications() {
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
           <Button size="sm" icon={CheckCheck} onClick={markAllRead} disabled={!unreadCount}>Mark all as read</Button>
           <Button size="sm" icon={Trash2} onClick={clearRead} disabled={!notifications.some((item) => item.read)}>Clear read</Button>
+          <Button size="sm" icon={RefreshCw} onClick={refreshAlerts}>Refresh from inventory</Button>
           <Button size="sm" variant="ghost" icon={X} onClick={clearAll} disabled={!notifications.length}>Clear all</Button>
           {permission === 'denied' && (
             <p className="w-full text-xs text-amber-700">Device alerts are blocked. Allow notifications for this site in your browser or device settings.</p>
@@ -222,7 +218,16 @@ export default function Notifications() {
           <EmptyState
             icon={Bell}
             title="Nothing here yet"
-            description="Try another filter, or new stock alerts will appear here automatically as your inventory changes."
+            description={
+              notifications.length
+                ? 'Try another filter. Open stock alerts are hidden from the Resolved tab.'
+                : 'Stock alerts appear here automatically when inventory changes. Refresh to sync the latest alerts from your current data.'
+            }
+            action={
+              notifications.length ? null : (
+                <Button icon={RefreshCw} onClick={refreshAlerts}>Refresh alerts</Button>
+              )
+            }
           />
         )}
       </Card>
