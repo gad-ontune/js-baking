@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from ..audit import verify_chain
 from ..auth import require_permissions
 from ..database import get_db
 from ..models import AuditLog
@@ -24,3 +25,12 @@ def list_audit(
         .limit(limit)
         .all()
     )
+
+
+@router.get('/verify')
+def verify_audit_integrity(
+    db: Session = Depends(get_db),
+    actor=Depends(require_permissions('audit.view')),
+) -> dict:
+    """Recompute the audit hash chain. No mutation endpoint exists."""
+    return verify_chain(db)

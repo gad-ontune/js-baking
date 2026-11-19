@@ -42,8 +42,8 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
     valid = bool(user and user.active and verify_password(user.password_hash, payload.password))
 
     if not valid:
-        rate_limiter.record(user_key)
-        rate_limiter.record(ip_key)
+        rate_limiter.record(user_key, window)
+        rate_limiter.record(ip_key, window)
         record_audit(
             db,
             request,
@@ -204,7 +204,7 @@ def forgot_password(
             details='No matching active owner account',
         )
 
-    rate_limiter.record(limit_key)
+    rate_limiter.record(limit_key, window)
     return ForgotPasswordResponse(
         message='If an active owner account matches those details, a reset code has been issued.',
         email_sent=email_configured(),
@@ -234,7 +234,7 @@ def reset_password(
     user.password_hash = hash_password(payload.new_password)
     _revoke_all_sessions(db, user.id)
     db.commit()
-    rate_limiter.record(limit_key)
+    rate_limiter.record(limit_key, settings.login_attempt_window_minutes * 60)
     record_audit(
         db, request, event_type='AUTH', action='PASSWORD_RESET_COMPLETED',
         entity='User', entity_id=user.id, user_id=user.id,
@@ -260,7 +260,7 @@ def request_email_verification(
 
     token, _ = issue_token(db, user, 'email_verification')
     delivered = send_email_verification(user.email, token)
-    rate_limiter.record(limit_key)
+    rate_limiter.record(limit_key, settings.login_attempt_window_minutes * 60)
     record_audit(
         db, request, event_type='AUTH', action='EMAIL_VERIFICATION_SENT',
         entity='User', entity_id=user.id, user_id=user.id,
@@ -435,7 +435,7 @@ def complete_mfa(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='This challenge is invalid. Sign in again.')
 
     if not _verify_second_factor(db, user, payload.code, request):
-        rate_limiter.record(limit_key)
+        rate_limiter.record(limit_key, settings.login_attempt_window_minutes * 60)
         record_audit(
             db, request, event_type='AUTH', action='MFA_VERIFY_FAILED',
             entity='User', entity_id=user.id, user_id=user.id, outcome='failure',

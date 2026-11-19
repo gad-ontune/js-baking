@@ -78,6 +78,7 @@ class AuditLog(Base):
     __tablename__ = 'audit_logs'
     __table_args__ = (
         Index('ix_audit_logs_created_at', 'created_at'),
+        UniqueConstraint('sequence_number', name='uq_audit_logs_sequence_number'),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -94,6 +95,10 @@ class AuditLog(Base):
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now)
+    # Append-only hash chain. Each entry commits to the previous entry's hash.
+    sequence_number: Mapped[int | None] = mapped_column(nullable=True)
+    previous_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class SecurityToken(Base):

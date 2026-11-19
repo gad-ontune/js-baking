@@ -177,6 +177,9 @@ class AuditResponse(StrictModel):
     outcome: str
     details: str | None
     created_at: datetime
+    sequence_number: int | None
+    previous_hash: str | None
+    entry_hash: str | None
 
     model_config = ConfigDict(from_attributes=True, extra='forbid')
 

@@ -196,7 +196,7 @@ def issue_password_reset_token(
     if target.email:
         delivered = send_password_reset(target.email, token, owner_initiated=True)
     _revoke_sessions(db, target.id)
-    rate_limiter.record(f'reset-token:owner:{actor.id}')
+    rate_limiter.record(f'reset-token:owner:{actor.id}', 900)
 
     record_audit(
         db,

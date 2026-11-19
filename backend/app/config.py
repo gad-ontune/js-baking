@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     cookie_secure: bool = False
     cookie_samesite: str = 'lax'
+    # When set, login/recovery limits are shared across all API workers.
+    redis_url: str = ''
     session_cookie_name: str = 'jsbh_session'
     csrf_cookie_name: str = 'jsbh_csrf'
 
