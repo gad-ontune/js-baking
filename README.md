@@ -8,13 +8,14 @@ The application is built around the supplied Software Requirements Specification
 
 ## Quick start
 
-Authentication is handled by the FastAPI backend; business demo data is stored in the browser. Run both servers:
+Authentication **and business data** are handled by the FastAPI backend. Run both servers:
 
 ```bash
 # Backend (security API)
 python3 -m venv backend/.venv
 backend/.venv/bin/pip install -r backend/requirements-dev.txt
 backend/.venv/bin/python backend/scripts/seed_demo.py
+backend/.venv/bin/python backend/scripts/seed_business.py
 backend/.venv/bin/python -m uvicorn backend.app.main:app --port 8000
 
 # Frontend, in a second terminal
@@ -147,7 +148,9 @@ src/
   main.jsx          App entry point
 ```
 
-Business demo data is persisted in `localStorage` under `js-baking-house-v3`; all of it flows through `src/lib/store.jsx`. Authentication, session state, the account directory and audit records now come from the FastAPI security backend through `src/lib/api.js`. Route guards use `src/lib/permissions.js`, which mirrors the backend role map, but the backend remains the only authority for whether an action is allowed. No password is stored in browser storage.
+Authentication, the account directory, audit records **and all business collections** come from the FastAPI backend through `src/lib/api.js`. The SPA hydrates inventory, movements, suppliers, products, purchases, sales, expenses and production from `GET /business/snapshot` and performs every write through the business endpoints; it never computes totals, stock levels, references or reversal state itself. `localStorage` under `js-baking-house-v3` is now only an offline fallback for unauthenticated demo browsing. Route guards use `src/lib/permissions.js`, which mirrors the backend role map, but the backend remains the only authority for whether an action is allowed. No password is stored in browser storage.
+
+Run `backend/scripts/seed_business.py` after `seed_demo.py` to populate a local demo dataset. It is idempotent, refuses to run in production unless explicitly overridden, and generates the data through the same service layer as the API so all stock effects and totals are server-computed.
 
 ---
 
@@ -168,7 +171,7 @@ Business demo data is persisted in `localStorage` under `js-baking-house-v3`; al
 
 ## Backend security API and SPA integration
 
-The FastAPI backend under `backend/` is connected to the React sign-in, route guards, user management and audit pages. Business records (inventory, purchases, production, sales, expenses, reports) are still local demo data because no business endpoints exist yet.
+The FastAPI backend under `backend/` is connected to the React sign-in, route guards, user management, audit pages **and business pages**. Inventory, suppliers, products, purchases, sales, expenses, production and stock movements are served by a generic business-record API with strict Pydantic validation at the edge, server-computed stock/totals, object-level ownership checks and reversal-only cancellation. Reports are derived in the SPA from the server-provided collections.
 
 ```bash
 # Install backend dependencies (dev + tests + scanners)
@@ -190,12 +193,22 @@ SEED_OWNER_USERNAME=... SEED_OWNER_PASSWORD=... \
 npm run verify && npm run verify:backend
 ```
 
-The API exposes `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/change-password`, `GET /api/v1/auth/me`, owner-only user management under `/api/v1/users`, a read-only `/api/v1/audit`, and `/health`. Authentication uses Argon2id hashes and server-managed HttpOnly cookies with double-submit CSRF tokens; there is no JWT and no credential in `localStorage` on the backend side. The SPA sends `credentials: 'include'` and copies only the CSRF cookie into a header.
+The API exposes `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/change-password`, `GET /api/v1/auth/me`, owner-only user management under `/api/v1/users`, a read-only `/api/v1/audit`, `/health`, and the business API under `/api/v1/business`.
 
-See `SECURITY_ASSESSMENT.md` for the full audit, implementation record, test results, remaining gaps and deployment configuration. **This is not a production-ready system**; MFA, PostgreSQL, backup/restore and business-record authorization are still outstanding.
+Business endpoints:
+
+- `GET /business/snapshot` and `GET /business/{kind}` — role-filtered reads.
+- `POST /business/{kind}` and `PATCH /business/{kind}/{id}` — validated create/update.
+- `POST /business/{kind}/{id}/reverse` — reversal that preserves history (no DELETE route).
+- `POST /business/inventory/{id}/movement` — server-derived stock delta.
+- `POST /business/purchase/{id}/payment` — balance/status calculated on the server.
+
+Staff may only update or reverse records they created; managers and owners may act on any record. A 404 is returned for another user's record so its existence is not disclosed. Authentication uses Argon2id hashes and server-managed HttpOnly cookies with double-submit CSRF tokens; there is no JWT and no credential in `localStorage` on the backend side. The SPA sends `credentials: 'include'` and copies only the CSRF cookie into a header.
+
+See `SECURITY_ASSESSMENT.md` for the full audit, implementation record, test results, remaining gaps and deployment configuration. **This is not a production-ready system**; MFA, PostgreSQL, backup/restore, HTTPS deployment and independent assurance are still outstanding.
 
 The visual identity is built with typography, colour and inline icons. Small PNG icons in `public/` are used only for PWA installation and device notifications.
 
 ---
 
-**Version:** 1.0 · **Default currency:** KES · **Status:** Client review build + API-backed authentication/RBAC
+**Version:** 1.0 · **Default currency:** KES · **Status:** Client review build + API-backed authentication/RBAC and server-enforced business records

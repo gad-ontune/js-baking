@@ -315,12 +315,12 @@ No production compliance claim is made. This section records the initial assessm
 
 ### 8.1 Features implemented and verified
 
-Authentication (Argon2id, generic errors, rate limiting, active-user checks), server-managed sessions with idle/absolute expiry and revocation, CSRF plus origin validation, backend RBAC with deny-by-default, strict request schemas, append-only audit records, CORS allowlist, security headers, body-size limits, safe error handling, owner bootstrap without committed secrets, frontend hygiene from Phase 1, and API-backed authentication, RBAC, user management, password change and audit viewing in the SPA (Phase 3).
+Authentication (Argon2id, generic errors, rate limiting, active-user checks), server-managed sessions with idle/absolute expiry and revocation, CSRF plus origin validation, backend RBAC with deny-by-default, strict request schemas, append-only audit records, CORS allowlist, security headers, body-size limits, safe error handling, owner bootstrap without committed secrets, frontend hygiene from Phase 1, API-backed authentication, RBAC, user management, password change and audit viewing in the SPA (Phase 3), and server-enforced business records with strict edge validation, server-computed stock/totals, object-level authorization and reversal-only cancellation (Phase 4).
 
 ### 8.2 Files created or modified
 
-- Backend: `backend/__init__.py`, `backend/app/{__init__,config,database,models,security,ratelimit,audit,auth,schemas,main}.py`, `backend/app/routers/{__init__,auth,users,audit}.py`, `backend/scripts/{create_owner,seed_demo}.py`, `backend/pytest.ini`, `backend/tests/{conftest,test_security,test_demo_seed}.py`, `backend/requirements.txt`, `backend/requirements-dev.txt`, `backend/.env.example`.
-- Frontend / repo: `src/lib/{api,permissions,demoCredentials}.js`, `src/lib/store.jsx`, `src/pages/Login.jsx`, `src/App.jsx`, `src/pages/settings/{Users,Audit}.jsx`, `src/lib/seed.js`, `vite.config.js`, `tests/{api,demoAccounts}.test.js`, `README.md`, `SECURITY_ASSESSMENT.md`, `package.json`, `.gitignore`, plus the Phase 1 files listed in section 6.
+- Backend: `backend/__init__.py`, `backend/app/{__init__,config,database,models,security,ratelimit,audit,auth,business,schemas,main}.py`, `backend/app/routers/{__init__,auth,users,audit,business}.py`, `backend/scripts/{create_owner,seed_demo,seed_business}.py`, `backend/pytest.ini`, `backend/tests/{conftest,test_security,test_demo_seed,test_business,test_business_seed}.py`, `backend/requirements.txt`, `backend/requirements-dev.txt`, `backend/.env.example`.
+- Frontend / repo: `src/lib/{api,permissions,demoCredentials}.js`, `src/lib/store.jsx`, `src/pages/Login.jsx`, `src/App.jsx`, `src/pages/settings/{Users,Audit}.jsx`, `src/lib/seed.js`, `vite.config.js`, `tests/{api,demoAccounts}.test.js`, business pages under `src/pages/{inventory,purchases,production,sales}`, `README.md`, `SECURITY_ASSESSMENT.md`, `package.json`, `.gitignore`, plus the Phase 1 files listed in section 6.
 
 ### 8.3 Security libraries introduced
 
@@ -329,27 +329,29 @@ Authentication (Argon2id, generic errors, rate limiting, active-user checks), se
 ### 8.4 Tests created and executed
 
 - `tests/security.test.js` — 7 frontend security tests (CSV injection, validation, password policy, navigation allowlist).
-- `tests/api.test.js` — 9 frontend API-client tests covering credential inclusion, CSRF header handling, network-error safety, route construction, secret-free errors, record mapping and RBAC mirror checks.
+- `tests/api.test.js` — 10 frontend API-client tests covering credential inclusion, CSRF header handling, network-error safety, route construction, secret-free errors, record mapping, RBAC mirror checks and the server-authoritative business routes/CSRF behaviour.
 - `tests/demoAccounts.test.js` — 2 consistency tests ensuring the one-click demo credentials match the backend seeder and that no plaintext passwords remain in `src/lib/seed.js`.
 - `backend/tests/test_security.py` — 34 backend security tests covering authentication, password security, sessions, RBAC, privilege escalation, IDOR-style user ID manipulation, brute-force protection, SQL injection, CSRF, origin validation, mass assignment, audit integrity, headers, body limits, error leakage and production configuration.
 - `backend/tests/test_demo_seed.py` — 3 tests covering demo password policy, production refusal and idempotent seeding.
-- Total: **55 automated tests** (18 frontend + 37 backend), all passing.
-- Backend tests deliberately do not exercise MFA, password reset, business-record IDOR, inventory/financial tampering or backup restoration because those controls do not exist yet.
+- `backend/tests/test_business.py` — 16 business API tests covering role-filtered snapshots, strict schema validation, object-level ownership (staff cannot act on another user's records), server-computed stock/totals, negative-stock rejection, reversal-only cancellation, supplier payments and audit events.
+- `backend/tests/test_business_seed.py` — 1 test confirming the demo business seeder produces consistent, non-negative inventory and valid sales.
+- Total: **73 automated tests** (19 frontend + 54 backend), all passing.
+- Backend tests deliberately do not exercise MFA, password reset or backup restoration because those controls do not exist yet.
 
 ### 8.5 Vulnerabilities resolved
 
-Plaintext backend credential storage; client-only authentication; client-only authorization; absent CSRF protection; absent login throttling; mutable client-side audit trail; CSV formula injection; open-redirect-like notification navigation; over-broad service worker caching; missing API security headers; submission of unvalidated numeric/date values; hard deletion of expense and production records in the demo; and the Starlette advisories found by `pip-audit`.
+Plaintext backend credential storage; client-only authentication; client-only authorization; absent CSRF protection; absent login throttling; mutable client-side audit trail; CSV formula injection; open-redirect-like notification navigation; over-broad service worker caching; missing API security headers; submission of unvalidated numeric/date values; hard deletion of expense and production records in the demo; browser-authoritative business data (totals, stock, references and reversal state); and the Starlette advisories found by `pip-audit`.
 
 ### 8.6 Remaining vulnerabilities and explicit gaps
 
 | Gap | Status | Impact |
 |---|---|---|
-| SPA authentication, RBAC, users and audit are API-backed; business records are still local demo data | **Partially implemented (Phase 3)** | Backend now enforces sign-in, roles, sessions, user changes and audit reads for the UI. Inventory/financial records have no API endpoints yet, so they remain browser-local and must not be used for real data. |
+| SPA authentication, RBAC, users, audit and business records are API-backed | **Implemented and verified (Phases 3–4)** | Backend enforces sign-in, roles, sessions, user changes, audit reads and all business collections for the UI. `localStorage` is only an offline fallback for unauthenticated demo browsing; authenticated writes go through the API and re-hydrate from the server snapshot. |
 | MFA/TOTP, recovery codes, MFA recovery | **Not implemented** | Owner/admin accounts lack a second factor. |
 | Password reset workflow | **Not implemented** | No token-based recovery, rate-limited reset or session invalidation on reset. |
 | PostgreSQL, migrations, least-privilege DB role, connection encryption | **Not implemented** | Default is local SQLite for development only. |
 | Encrypted backups, off-server storage, restore drill | **Not implemented** | No RPO/RTO can be demonstrated. |
-| Object-level authorization and transactional integrity for business records | **Not implemented** | No purchase/sale/expense/inventory API endpoints exist yet. |
+| Object-level authorization and transactional integrity for business records | **Implemented and verified (Phase 4)** | Business endpoints enforce per-record ownership: staff may only update/reverse records they created; managers/owners may act on any record. Financial totals, references, reversal state and stock deltas are server-computed inside a transaction. See section 10. |
 | Shared rate limiter for multi-worker deployments | **Partially implemented** | In-memory limiter is per process; use Redis in production. |
 | HTTPS/TLS termination and trusted-proxy configuration | **Not implemented** | `COOKIE_SECURE` and HSTS must be enabled at the edge. |
 | Audit hash chaining, anomaly alerting, WAF | **Not implemented** | Priority 2 hardening. |
@@ -380,7 +382,7 @@ Plaintext backend credential storage; client-only authentication; client-only au
 - Argon2 calibration and login latency under expected load.
 - Behaviour of the in-memory rate limiter with multiple application workers.
 - Full OWASP ASVS 5.0.0 Level 2 review and authorised penetration testing.
-- MFA, password reset, backup and business-integrity controls once implemented.
+- MFA, password reset and backup/restore controls once implemented.
 
 ---
 
@@ -402,10 +404,53 @@ Plaintext backend credential storage; client-only authentication; client-only au
 
 **Verification executed**
 
-- `npm test` — **18 passed** (7 original + 9 API-client + 2 demo-account consistency).
-- `npm run test:backend` — **37 passed** (34 security + 3 demo-seed).
+- `npm test` — **19 passed** (7 original + 10 API-client + 2 demo-account consistency; the extra API test asserts the business routes and CSRF behaviour from Phase 4).
+- `npm run test:backend` — **54 passed** at this phase (34 security + 3 demo-seed + 16 business + 1 business-seed).
 - `npm run lint` and `npm run build` — pass.
 - Live end-to-end smoke test through the Vite proxy: owner login returned the backend user and CSRF token; `/auth/me`, `/users` and `/audit` succeeded with the session cookie; logout without a CSRF header returned **403**, with the header **204**, and `/auth/me` then returned **401**.
 - Standalone script checks: owner bootstrap, demo seeding, and production refusal (exit 2) all behaved as documented.
 
-**Scope boundary:** business data (inventory, purchases, production, sales, expenses, reports) is still stored in `localStorage`. The backend does not yet expose endpoints for those records, so the SPA cannot claim server-side enforcement for them. This is tracked as an explicit gap in section 8.6.
+**Scope boundary:** at this phase business data (inventory, purchases, production, sales, expenses) was still stored in `localStorage`. Phase 4 (section 10) subsequently moved those collections behind the business API, so this boundary no longer applies.
+
+---
+
+## 10. Implementation progress — Phase 4 (server-enforced business records)
+
+**Status:** implemented and verified locally. This closes the business-data gap recorded in sections 8.6 and 9.
+
+### 10.1 Design
+
+Business records use a single `BusinessRecord` JSON table with a `kind` discriminator (`inventory`, `movement`, `supplier`, `product`, `purchase`, `sale`, `expense`, `production`). Strict Pydantic schemas at the API edge reject unknown fields and validate types, ranges and dates before a typed service layer applies domain rules. There are **no DELETE endpoints**: cancellations are reversals that preserve the original record and its audit trail.
+
+The SPA hydrates all collections from `GET /business/snapshot` and performs every write through the business API; it no longer computes totals, stock levels, references, creator fields or reversal state. Those values are derived on the server and returned in the response. `localStorage` remains only an offline fallback for unauthenticated demo browsing.
+
+### 10.2 Controls implemented
+
+| Control | Implementation | Verification |
+|---|---|---|
+| Strict input validation and mass-assignment rejection | `backend/app/schemas.py`: `extra='forbid'`, length/range limits, date validators, nullable `productId` for writable product entry, expanded update DTOs. Client-supplied `total`, `paidAmount` and `quantity` fields on protected routes are rejected with 422. | `test_business_records_are_persisted_as_typed_json`, `test_inventory_update_cannot_change_quantity_directly`, `test_purchase_uses_server_computed_totals_and_updates_stock`, `test_sale_decreases_stock_and_creates_new_products_server_side` |
+| Authentication and role-filtered reads | Business endpoints require a session; `GET /business/snapshot` and `GET /business/{kind}` apply `ROLE_PERMISSIONS`; staff cannot read suppliers or purchases. | `test_business_endpoints_require_authentication`, `test_snapshot_only_returns_collections_the_role_can_view`, `test_staff_cannot_create_suppliers_or_purchases`, `test_staff_can_manage_sales_and_expenses_but_not_settings` |
+| Object-level authorization | Staff may only update/reverse records they created; managers/owners may act on any record. A 404 is returned for another user's record so its existence is not disclosed. | `test_staff_cannot_update_or_reverse_another_users_record`, `test_manager_can_operate_on_any_staff_record` |
+| Server-computed financial totals | Purchase totals, sale subtotal/total/COGS, supplier balances and payment status are calculated server-side from validated line items; client-supplied totals are not accepted. | `test_purchase_uses_server_computed_totals_and_updates_stock`, `test_sale_decreases_stock_and_creates_new_products_server_side`, `test_payment_updates_balance_and_is_limited_to_outstanding_amount` |
+| Server-derived stock movements | Movement type determines the delta: Purchase `+qty`, Adjustment sets the target `qty`, other types `-qty`. Purchases and sales create their movements in the same transaction. | `test_inventory_movements_apply_server_computed_stock_changes`, `test_purchase_uses_server_computed_totals_and_updates_stock`, `test_sale_decreases_stock_and_creates_new_products_server_side` |
+| Negative stock prevention | A movement or sale that would drive stock below zero is rejected with 409 before any write; all lines are validated before movements are applied. | `test_inventory_movements_apply_server_computed_stock_changes`, `test_sale_cannot_oversell_tracked_stock` |
+| Writable product catalogue | A sale may reference an existing product by id/name or introduce a new product name; the server creates the catalogue record (with an explicit `db.flush()` before stock lookups, because the session uses `autoflush=False`). | `test_sale_decreases_stock_and_creates_new_products_server_side` |
+| Reversal instead of deletion | Sales, purchases, expenses and production are voided via `/reverse`, which records the actor, reason and timestamp and restores stock/balances. No DELETE route is registered (DELETE returns 405). | `test_purchase_reversal_reverses_stock_and_preserves_history`, `test_sale_decreases_stock_and_creates_new_products_server_side`, `test_staff_cannot_update_or_reverse_another_users_record` |
+| CSRF on business writes | Every state-changing business request requires the double-submit CSRF token. | `test_csrf_required_for_business_writes` |
+| Append-only audit coverage | Business creates, movements and other actions append server-side audit events with request metadata. | `test_business_actions_write_append_only_audit_records` |
+| Demo business seeder | `backend/scripts/seed_business.py` generates a consistent demo dataset through the same service layer as the API; idempotent and production-guarded. | `backend/tests/test_business_seed.py`; live seeding produced 18 inventory, 5 suppliers, 8 products, 10 purchases, 40 sales, 18 expenses, 15 production and 101 movements |
+
+### 10.3 Verification executed
+
+- `npm run verify` — **19 frontend tests**, lint, build and `npm audit --audit-level=high` pass (2 moderate React Router advisories remain documented).
+- `npm run verify:backend` — **54 backend tests**, `pip-audit` and Bandit pass.
+- Live HTTP smoke test against `uvicorn` with seeded data:
+  - Owner snapshot returned all eight collections with expected counts.
+  - A stock movement without a CSRF header returned **403**; with the header it moved Flour `151 → 156` and logged `STOCK_MOVEMENT`.
+  - A sale with a custom product created the product server-side, computed `total=6700`/`cost=260`, reduced tracked stock, and reversal returned `voided: true` with stock restored; audit showed `SALE_RECORDED`, `PRODUCT_CREATED` and `SALE_VOIDED`.
+  - Staff snapshot returned **0** suppliers and **0** purchases; staff `GET`/`POST /business/purchase` both returned **403**.
+  - Vite proxy smoke test: `/api/v1/business/snapshot` and the SPA root both returned **200**.
+
+### 10.4 Residual risk
+
+Backend business enforcement is now in place, but the deployment and assurance controls in sections 8.6–8.8 still apply: SQLite development storage rather than PostgreSQL, no encrypted backups or restore drill, no HTTPS/WAF configuration, in-process rate limiting, no Argon2 benchmarking, and no independent ASVS review or penetration testing. MFA and password reset remain unimplemented. **No production-ready or compliant claim is made.**
