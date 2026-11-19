@@ -1,0 +1,24 @@
+rules:
+  - id: python-no-eval
+    languages: [python]
+    severity: ERROR
+    message: "eval() executes arbitrary code; remove it."
+    pattern: eval(...)
+
+  - id: python-no-shell-true
+    languages: [python]
+    severity: WARNING
+    message: "subprocess with shell=True can allow command injection."
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+
+  - id: python-no-disabled-tls-verification
+    languages: [python]
+    severity: ERROR
+    message: "TLS certificate verification must not be disabled."
+    pattern: requests.$FUNC(..., verify=False, ...)
+
+  - id: js-no-dangerous-html
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "Rendering raw HTML can introduce DOM XSS."
+    pattern: dangerouslySetInnerHTML=...

@@ -1,0 +1,18 @@
+title = "JS Baking House Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# These files intentionally contain PUBLIC development-only demo credentials,
+# placeholders or test fixtures. They are never used in a production deployment.
+[allowlist]
+paths = [
+  '''backend/scripts/seed_demo\.py''',
+  '''src/lib/demoCredentials\.js''',
+  '''backend/tests/.*''',
+  '''tests/.*''',
+  '''README\.md''',
+  '''SECURITY_ASSESSMENT\.md''',
+  '''\.env\.example''',
+  '''docker-compose\.yml''',
+]
