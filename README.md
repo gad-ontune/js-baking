@@ -151,10 +151,15 @@ src/
   App.jsx           Routes and permission guards
   main.jsx          App entry point
 backend/
-  app/              FastAPI routers, RBAC, audit chain, MFA, email and rate limiting
+  app/              FastAPI routers, RBAC, audit chain, MFA, email, rate limiting and anomaly alerts
   migrations/       Alembic revisions (schema authority for PostgreSQL)
-  scripts/          Owner bootstrap, demo seeding, audit-chain verification
-deploy/             Dockerfiles, nginx configuration and demo environment template
+  scripts/          Owner bootstrap, demo seeding, audit-chain and DB-hardening verification, Argon2 benchmark
+deploy/             Dockerfiles, nginx templates, backup/restore scripts, demo env and TLS helpers
+docker-compose.yml                 Base stack (PostgreSQL, Redis, API, nginx, encrypted backups)
+docker-compose.demo.yml            Public demo overlay with seeded data
+docker-compose.tls.yml             HTTPS, HSTS, HTTP→HTTPS redirect and certbot overlay
+docker-compose.trusted-proxy.yml   Optional overlay for an upstream proxy/CDN
+ASVS_EVIDENCE.md                   Self-assessment evidence and pentest preparation
 ```
 
 Authentication, the account directory, audit records **and all business collections** come from the FastAPI backend through `src/lib/api.js`. The SPA hydrates inventory, movements, suppliers, products, purchases, sales, expenses and production from `GET /business/snapshot` and performs every write through the business endpoints; it never computes totals, stock levels, references or reversal state itself. `localStorage` under `js-baking-house-v3` is now only an offline fallback for unauthenticated demo browsing. Route guards use `src/lib/permissions.js`, which mirrors the backend role map, but the backend remains the only authority for whether an action is allowed. No password is stored in browser storage.
@@ -213,6 +218,13 @@ Recovery and verification endpoints:
 - `POST /auth/mfa/setup`, `/mfa/enable`, `/mfa/disable`, `/mfa/complete` — TOTP enrolment and challenge login with hashed one-time recovery codes.
 - `GET /audit/verify` — recomputes the append-only audit hash chain (owner only).
 
+Security alerts are derived from committed audit events: repeated failed
+sign-ins, role/status changes, recovery-code issuance and audit-chain failures
+send one deduplicated email and/or HTTPS webhook notification. Configure
+`ALERT_EMAIL_TO` and/or `ALERT_WEBHOOK_URL`; with Redis configured, deduplication
+is shared across API workers. The chain is also re-verified periodically in
+production. No tokens, passwords or MFA secrets are included in alerts.
+
 Generic responses are used for unknown accounts so the recovery endpoint cannot be used to enumerate users. In production, unconfigured SMTP or MFA encryption fails closed instead of silently issuing unusable codes.
 
 Business endpoints:
@@ -232,23 +244,42 @@ The stack serves the built SPA from an unprivileged nginx container and proxies
 first-party. PostgreSQL and Redis are on an internal network and are not
 published to the host. Both application images run as a non-root user.
 
-```bash
-# 1. Configure the deployment (all secrets come from .env, never from source)
-cp .env.example .env
-#    - set POSTGRES_PASSWORD and REDIS_PASSWORD (URL-safe letters/digits)
-#    - set CORS_ORIGINS and FRONTEND_URL to the public HTTPS origin
-#    - set SMTP_HOST/SMTP_FROM (and credentials if required) for recovery emails
-#    - generate MFA_ENCRYPTION_KEY:
-#      python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
-#    - optionally set SEED_OWNER_* once to bootstrap the first real owner
+### 1. Configure secrets
 
-# 2. Build and start
+```bash
+cp .env.example .env
+```
+
+Fill in every required value; the stack fails closed when a required secret is
+missing.
+
+| Variable group | Purpose |
+|---|---|
+| `POSTGRES_PASSWORD`, `REDIS_PASSWORD` | Bootstrap database superuser and Redis auth. |
+| `JSBH_OWNER_PASSWORD`, `JSBH_APP_PASSWORD` | Separate Alembic schema-owner and runtime API roles; each **at least 20 URL-safe characters**. The bootstrap credential is never used by the API. |
+| `BACKUP_PASSPHRASE` | At least 20 characters; encrypts database dumps with AES-256. Store it separately from `.env`. |
+| `RCLONE_REMOTE` **or** `ALLOW_LOCAL_ONLY_BACKUPS=true` | Backups refuse to run unless an off-site rclone destination is configured or local-only demo use is explicitly accepted. Mount the rclone config at `/config/rclone/rclone.conf` for off-site copies. |
+| `SMTP_HOST`, `SMTP_FROM`, `SMTP_*` | Required in production for owner recovery and email verification. |
+| `MFA_ENCRYPTION_KEY` | Base64-urlsafe 32-byte Fernet key: `python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`. |
+| `CORS_ORIGINS`, `FRONTEND_URL`, `COOKIE_SECURE` | Set to the public HTTPS origin; keep `COOKIE_SECURE=true`. |
+| `ALERT_EMAIL_TO`, `ALERT_WEBHOOK_URL` | At least one destination enables audit anomaly alerts. Webhooks require HTTPS in production. |
+| `TLS_DOMAIN`, `TLS_EMAIL`, `TLS_CERT_DIR` | Used by the HTTPS overlay below. |
+| `SEED_OWNER_*` | Optional one-time first-owner bootstrap. Never commit these values. |
+
+Before finalising hashing settings, benchmark Argon2id on the target instance:
+
+```bash
+backend/.venv/bin/python backend/scripts/benchmark_argon2.py --samples 5 --target-ms 500
+```
+
+The defaults (`m=19456 KiB, t=2, p=1`) follow the OWASP baseline. Change them
+only after measuring real login latency on production-class hardware.
+
+### 2. Build and start
+
+```bash
 docker compose up --build -d
 
-# 3. Open the site at the origin configured in CORS_ORIGINS, then sign in
-#    with the owner you bootstrapped or created through the API.
-
-# Useful follow-ups
 docker compose logs -f backend
 docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 docker compose exec backend alembic current
@@ -256,11 +287,107 @@ docker compose exec backend python backend/scripts/verify_audit_chain.py
 docker compose down          # stop without deleting data volumes
 ```
 
-Schema changes are owned by Alembic: the backend entrypoint runs
-`alembic upgrade head` before any worker starts, and `AUTO_CREATE_SCHEMA=false`
-prevents the API from creating or altering tables at runtime. Back up the
-`pgdata` volume with your normal encrypted backup tooling and rehearse a restore
-before relying on it.
+Schema changes are owned by Alembic: the backend entrypoint provisions roles,
+runs `alembic upgrade head`, refreshes least-privilege grants, and only then
+starts workers. `AUTO_CREATE_SCHEMA=false` prevents the API from creating or
+altering tables at runtime.
+
+### Database roles and audit protection
+
+Three database identities are used:
+
+- **Bootstrap** (`BOOTSTRAP_DATABASE_URL`) exists only to create roles and is
+  never used by the application at runtime.
+- **Schema owner** (`jsbh_owner`, via `MIGRATION_DATABASE_URL`) is the only role
+  allowed to run Alembic migrations.
+- **Runtime API** (`jsbh_app`, via `DATABASE_URL`) has table-level
+  `SELECT/INSERT/UPDATE/DELETE` but no schema-creation rights and no
+  `UPDATE`/`DELETE`/`TRUNCATE` on `audit_logs`.
+
+Every connection uses `sslmode=require` against PostgreSQL with internal TLS.
+A database trigger rejects any attempt to modify an audit row, even by the
+bootstrap role. Verify the deployed configuration with:
+
+```bash
+docker compose run --rm --entrypoint python backend \
+  backend/scripts/verify_database_hardening.py
+```
+
+### Encrypted backups and restore drill
+
+The backup service runs `pg_dump -Fc`, encrypts with GPG AES-256, writes a
+SHA-256 checksum, verifies the ciphertext decrypts, and keeps 14 daily, 8
+weekly and 12 monthly copies. It also runs once at startup and follows
+`BACKUP_CRON`. Off-site sync uses rclone and is verified after each run.
+
+```bash
+docker compose logs -f backup
+docker compose exec backup sh -c 'ls -la /backups/daily'
+
+# Rehearse a restore into a throwaway database and compare with live data
+BACKUP_ENV_FILE=.env deploy/restore-drill.sh
+# For the demo stack:
+# BACKUP_ENV_FILE=deploy/demo.env.example \
+#   BACKUP_EXTRA_FILES='-f docker-compose.demo.yml' deploy/restore-drill.sh
+```
+
+The drill takes a fresh encrypted backup by default (pass a backup file as an
+argument to test an older copy), then checks the checksum, decrypts it,
+restores it into a throwaway database, verifies the audit chain and compares
+row counts for `users`, `business_records`, `audit_logs` and `sessions`.
+
+### HTTPS, HSTS and edge filtering
+
+The base stack listens on `${WEB_PORT:-8080}` over HTTP. Add the TLS overlay for
+HTTPS termination, an HTTP→HTTPS redirect, HSTS and certbot webroot support:
+
+```bash
+TLS_DOMAIN=bakery.example.com TLS_EMAIL=ops@example.com \
+  docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+```
+
+This publishes ports 80 and 443 and loads certificates from
+`${TLS_CERT_DIR:-./deploy/certs}/live/$TLS_DOMAIN/`. certbot renews them into
+that directory and the nginx user (UID 10001) is given read access. For a local
+self-signed smoke test only:
+
+```bash
+deploy/generate-dev-cert.sh /tmp/jsbh-tls localhost
+TLS_DOMAIN=localhost TLS_EMAIL=dev@example.com TLS_CERT_DIR=/tmp/jsbh-tls \
+  docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+```
+
+`deploy/generate-dev-cert.sh` is **never** for production. If an upstream proxy
+or CDN terminates TLS, use the trusted-proxy overlay instead and restrict
+nginx to the proxy network:
+
+```bash
+TRUSTED_PROXY_CIDR=10.0.0.0/8 \
+  docker compose -f docker-compose.yml -f docker-compose.trusted-proxy.yml up -d
+```
+
+nginx templates render at container start. The edge rules reject disallowed
+methods, dotfiles, backup extensions, path traversal, null bytes and common
+scanner user agents; the authoritative rate limits remain in the API/Redis.
+
+### Automated security smoke test
+
+```bash
+# Base HTTP demo
+BASE_URL=http://127.0.0.1:8080 deploy/security-smoke.sh
+
+# Local TLS smoke (self-signed)
+BASE_URL=https://127.0.0.1:18443 HTTP_URL=http://127.0.0.1:18080 \
+  EXPECT_TLS=true INSECURE_TLS=true deploy/security-smoke.sh
+
+# Real deployment: omit INSECURE_TLS so the certificate must validate
+BASE_URL=https://bakery.example.com HTTP_URL=http://bakery.example.com \
+  EXPECT_TLS=true deploy/security-smoke.sh
+```
+
+The script is read-only apart from intentionally failed logins and checks
+authentication boundaries, WAF filters, rate limiting, security headers, HSTS,
+redirects and absence of demo credentials in the public HTML.
 
 ### Docker demo (clean local setup)
 
@@ -284,18 +411,23 @@ via the owner-only, CSRF-protected demo reset endpoint (disabled in production).
 npm run verify             # frontend tests, lint, production build, npm audit
 npm run verify:backend     # backend tests, pip-audit, Bandit
 cd backend && alembic upgrade head && alembic check
-# Validate the compose definition (requires .env, or use the demo env template)
 docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet
+TLS_DOMAIN=localhost TLS_EMAIL=dev@example.com \
+  docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.tls.yml config --quiet
+docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml run --rm \
+  --entrypoint python backend backend/scripts/verify_database_hardening.py
+BACKUP_ENV_FILE=deploy/demo.env.example BACKUP_EXTRA_FILES='-f docker-compose.demo.yml' deploy/restore-drill.sh
 ```
 
-CI runs all of these on every push, plus Gitleaks secret scanning and Semgrep
-static analysis.
+CI runs the test, lint, build, dependency and static-analysis gates on every
+push, plus Gitleaks secret scanning and Semgrep.
 
-`SECURITY_ASSESSMENT.md` contains the full audit, implementation record, test
-results and residual gaps. Deployment is built and smoke-tested, but encrypted
-backup/restore rehearsal, TLS/WAF configuration in a real environment, Argon2
-benchmarking on target hardware and independent ASVS review remain before this
-should be described as production-hardened.
+`SECURITY_ASSESSMENT.md` contains the full audit and implementation record.
+`ASVS_EVIDENCE.md` records the self-assessment evidence, operator steps and
+penetration-test preparation. The controls are implemented and verified
+locally, but a trusted certificate, off-site backups, target-hardware
+benchmarking and independent ASVS/pentest review remain before any
+production-hardened or compliant claim can be made.
 
 The visual identity is built with typography, colour and inline icons. Small PNG icons in `public/` are used only for PWA installation and device notifications.
 

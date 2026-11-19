@@ -24,6 +24,12 @@ DRILL_DB=jsbh_restore_drill
 cleanup() { compose exec -T db psql -U "$DB_USER" -d postgres -c "DROP DATABASE IF EXISTS $DRILL_DB;" >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 
+if [ -z "${1:-}" ]; then
+  # Take a fresh point-in-time backup so the row-count comparison is valid.
+  # An explicitly supplied file is still supported for testing older backups.
+  echo '[jsbh drill] Creating a fresh encrypted backup for the drill...'
+  compose run --rm --entrypoint /usr/local/bin/backup.sh backup
+fi
 BACKUP_FILE=${1:-$(compose run --rm --entrypoint sh backup -c 'ls -1t /backups/daily/*.gpg | head -1')}
 [ -n "$BACKUP_FILE" ] || { echo 'No backup file found.' >&2; exit 1; }
 echo "[jsbh drill] Testing backup: $BACKUP_FILE"

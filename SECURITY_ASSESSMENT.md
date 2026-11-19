@@ -490,7 +490,7 @@ stack. This is the authoritative status section and supersedes the stale
 
 | Control | Implementation | Verification |
 |---|---|---|
-| Real email delivery and verification | `backend/app/email.py` and `backend/app/routers/auth.py`: SMTP (configurable host/port/TLS/credentials) sends single-use verification and recovery codes; `FRONTEND_URL` builds links. Production fails closed with 503 if SMTP is unconfigured. | `test_recovery.py`; live demo issued codes (email delivery disabled in the demo overlay) |
+| Real email delivery and verification | `backend/app/email_service.py` and `backend/app/routers/auth.py`: SMTP (configurable host/port/TLS/credentials) sends single-use verification and recovery codes; `FRONTEND_URL` builds links. Production fails closed with 503 if SMTP is unconfigured. | `test_recovery.py`; live demo issued codes (email delivery disabled in the demo overlay) |
 | Owner-controlled password recovery | `POST /auth/forgot-password` verifies username **and** registered email and returns a generic response; `POST /auth/reset-password` exchanges a single-use, expiring token, enforces the password policy and revokes all sessions. Passwords are never displayed — Argon2id hashes only. | `test_recovery.py` (7 tests) |
 | Staff reset tokens | `POST /users/{id}/reset-token` is owner-only and issues a one-time code for a staff/manager account. Development may display it once in the UI (`dev_token`); production hides it unless `JSBH_SHOW_DEV_TOKENS=true`. | `test_recovery.py`; live stack issued and redeemed a code for `brian` |
 | Email verification | `POST /auth/email/verification-code` / `POST /auth/email/verify` use single-use codes; verification state is recorded on the user. | `test_recovery.py` |
@@ -501,7 +501,12 @@ stack. This is the authoritative status section and supersedes the stale
 | Prefixed ID width fix | Revision `22c4d8441b51` widens all prefixed ID/foreign-key columns (users, sessions, business records, audit, tokens, recovery codes) from `VARCHAR(36)` to `String(64)`; SQLite silently accepted the too-short values while PostgreSQL rejected them. | `test_config.py::test_id_columns_fit_prefixed_identifiers_on_strict_databases`; fresh PostgreSQL seed produced 126 audit records and the full business snapshot |
 | Dependency currency | Upgraded to `react-router-dom@7.18.6` (routes migrated to React Router v7) and current FastAPI/Starlette; no known npm or pip advisories. | `npm audit` 0 vulnerabilities; `pip-audit` clean |
 | CI gates | `.github/workflows/ci.yml` runs frontend tests/lint/build/npm audit, backend tests/pip-audit/Bandit, Alembic `upgrade head && check`, Gitleaks (`.gitleaks.toml`) and Semgrep (`.semgrep.yml`) on every push and pull request. | Workflow pushed to `main` |
-| Docker Compose deployment | `deploy/backend.Dockerfile` (non-root UID 10001, `PYTHONPATH=/app`), `deploy/frontend.Dockerfile` (unprivileged nginx), `deploy/nginx.conf` (same-origin `/api` proxy, `/tmp/nginx.pid`, hidden-dot deny), `deploy/nginx-headers.conf` (CSP, HSTS, COOP/CORP), `docker-compose.yml` (PostgreSQL + Redis on an internal network, health checks), `docker-compose.demo.yml` for local demo. | Full stack built from fresh volumes; all containers healthy; smoke tests below |
+| Docker Compose deployment | `deploy/backend.Dockerfile` (non-root UID 10001, `PYTHONPATH=/app`), `deploy/frontend.Dockerfile` (unprivileged nginx), templated `deploy/nginx.conf.template` / `server-locations.conf.template` / `nginx-headers.conf.template` rendered by `web-entrypoint.sh` (same-origin `/api` proxy, WAF filters, CSP/COOP/CORP), `docker-compose.yml` (PostgreSQL + Redis + backup service on internal networks, health checks), `docker-compose.demo.yml` for local demo. | Full stack built from fresh volumes; all containers healthy; 32-check security smoke below |
+| Least-privilege database access | `provision_database.py`, `grant_runtime_permissions.py`, `verify_database_hardening.py`: bootstrap role only creates `jsbh_owner`/`jsbh_app`; Alembic runs as owner; API runtime cannot create schema objects or update/delete audit rows. All DSNs use `sslmode=require`; PostgreSQL generates an internal TLS certificate on first volume init. Append-only trigger rejects every audit mutation. | `verify_database_hardening.py` passed all checks; `show ssl` = `on`; direct `UPDATE audit_logs` failed with `audit_logs is append-only` |
+| Encrypted backups and restore drill | `deploy/backup.sh`: `pg_dump -Fc` → GPG AES-256 → SHA-256 → decrypt verification → 14/8/12 retention → optional rclone off-site sync. Fails closed without `RCLONE_REMOTE` unless `ALLOW_LOCAL_ONLY_BACKUPS=true`. `deploy/restore-drill.sh` restores into a throwaway DB and compares audit chain plus row counts. | Backup created and checksum-verified in demo stack; drill restored 3 users, 215 business records, 126 audit logs and 1 session with an intact chain |
+| TLS, WAF and trusted proxy | `docker-compose.tls.yml`: HTTPS on 443 with TLS 1.2/1.3 only, HSTS, HTTP→HTTPS redirect, certbot webroot. `docker-compose.trusted-proxy.yml` opts into `set_real_ip_from` for a named proxy CIDR. Edge filters reject bad methods, dotfiles, backup extensions, traversal, null bytes and scanner UAs. | Local self-signed TLS smoke: 301 redirect, HSTS, TLS 1.2/1.3 accepted and TLS 1.1 rejected, login + audit verification over HTTPS, all 32 smoke checks pass |
+| Argon2 benchmarking | `backend/scripts/benchmark_argon2.py` measures median/p95 hash and verify latency for four parameter sets plus the configured default, confirms Argon2id, and recommends a candidate under a target latency. Defaults remain the OWASP baseline. | Benchmark run locally (`m=19456 KiB, t=2, p=1`, ~67 ms hash, ~55 ms verify); `test_argon2_benchmark.py` adds 4 regression tests |
+| Audit anomaly alerting | `backend/app/alerting.py` sends deduplicated email/HTTPS-webhook alerts for failed-login bursts, role/status changes, recovery-code issuance, MFA disablement and audit-chain failures. Redis provides cross-worker deduplication; production re-verifies the chain on a schedule. No secrets are included in alerts. | `test_alerting.py` (5 tests) covers burst, privileged events, chain failure on demand and on verification; full backend suite passes |
 
 Three bugs surfaced and were fixed during the Docker smoke test: PostgreSQL
 `StringDataRightTruncation` on prefixed IDs, `ModuleNotFoundError: No module
@@ -512,9 +517,9 @@ and, for the ID bug, a regression test.
 ### 11.2 Verification executed
 
 - `npm run verify` — **21 frontend tests**, lint, production build and `npm audit --audit-level=high` pass; **0 npm vulnerabilities**.
-- `npm run verify:backend` — **78 backend tests**, `pip-audit` and Bandit pass.
+- `npm run verify:backend` — **90 backend tests**, `pip-audit` and Bandit pass (0 findings after explicit `nosec` justifications for the benchmark fixture and validated HTTPS webhook call).
 - `cd backend && alembic upgrade head && alembic check` — **No new upgrade operations detected**.
-- `docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet` — valid. The production `docker compose config` correctly fails closed when the required `POSTGRES_PASSWORD`/`REDIS_PASSWORD` are absent, so CI validates with the demo template.
+- Compose config validated for the demo stack, the base production stack with the TLS overlay, and the trusted-proxy overlay. The production `docker compose config` fails closed when required role/backup/TLS secrets are absent, so CI validates with the demo template.
 - Fresh-volume Docker demo smoke test through nginx on port 8080:
   - `/health` returned `{"status":"ok"}`; SPA root returned 200 with the JS Baking House title; CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy, COOP and CORP headers present; `index.html` sent `Cache-Control: no-store`.
   - Owner login returned a user and CSRF token; `/auth/me` confirmed the registered email; snapshot returned `inventory=18, movements=101, suppliers=5, products=8, purchases=10, sales=40, expenses=18, production=15`.
@@ -522,6 +527,9 @@ and, for the ID bug, a regression test.
   - Owner issued a one-time reset code for `brian`, redeemed it, the old password returned 401 and the new password logged in.
   - MFA enrolment produced a 32-character secret and 10 recovery codes; enabling MFA made the next login return a challenge; the challenge completed and created a session. PostgreSQL stored the secret as `gAAAAABq...` (140 chars) with 10 recovery-code hashes, confirming encryption at rest.
   - Redis limiter returned 401 for five bad logins and 429 on the sixth.
+- Database hardening verification against the deployed stack: encrypted connection, dedicated roles, correct privileges and append-only audit trigger all passed; `show ssl` returned `on`; a direct `UPDATE audit_logs` failed with `ERROR: audit_logs is append-only`.
+- Backup/restore drill: a fresh encrypted backup restored into `jsbh_restore_drill`; the audit chain was intact and counts matched live (`users: 3`, `business_records: 215`, `audit_logs: 138`, `sessions: 3`).
+- TLS overlay smoke with a local self-signed certificate: HTTP 80 returned `301` to HTTPS, HSTS and all security headers were present, TLS 1.2 and 1.3 succeeded while TLS 1.1 was rejected, login and `/audit/verify` worked over HTTPS, and the SPA root/assets returned 200. `deploy/security-smoke.sh` passed **32/32 checks**, including WAF filters and rate limiting.
 
 ### 11.3 Commands
 
@@ -538,23 +546,51 @@ docker compose up --build -d
 # Verification
 npm run verify && npm run verify:backend
 cd backend && alembic upgrade head && alembic check
+python backend/scripts/benchmark_argon2.py --samples 5 --target-ms 500
+
 docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet
+TLS_DOMAIN=localhost TLS_EMAIL=dev@example.com \
+  docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.tls.yml config --quiet
+
+docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml run --rm \
+  --entrypoint python backend backend/scripts/verify_database_hardening.py
+BACKUP_ENV_FILE=deploy/demo.env.example BACKUP_EXTRA_FILES='-f docker-compose.demo.yml' deploy/restore-drill.sh
+BASE_URL=http://127.0.0.1:8080 deploy/security-smoke.sh
+
+# TLS smoke with a throwaway certificate (local only)
+deploy/generate-dev-cert.sh /tmp/jsbh-tls localhost
+TLS_DOMAIN=localhost TLS_EMAIL=dev@example.com TLS_CERT_DIR=/tmp/jsbh-tls \
+  docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.tls.yml up -d
+BASE_URL=https://127.0.0.1:18443 HTTP_URL=http://127.0.0.1:18080 \
+  EXPECT_TLS=true INSECURE_TLS=true deploy/security-smoke.sh
 ```
 
-### 11.4 Residual gaps
+### 11.4 Residual gaps and required operator actions
 
-- Encrypted backups of `pgdata`, off-server storage and a rehearsed restore
-  drill (no RPO/RTO can be demonstrated).
-- TLS/WAF termination, HTTP→HTTPS redirect and trusted-proxy configuration in
-  a real environment (nginx currently serves HTTP on 8080 behind the stack).
-- Least-privilege database role review, including denying `UPDATE`/`DELETE` on
-  `audit_logs` to the API account.
-- Argon2 work-factor benchmarking on the target hardware.
-- Audit anomaly alerting and WAF rules.
-- Independent OWASP ASVS 5.0.0 Level 2 review and authorised penetration
-  testing.
+Closed in this repository (evidence above): encrypted backups and a rehearsed
+restore; TLS/WAF/HSTS/trusted-proxy overlays; least-privilege database roles
+with append-only audit enforcement; Argon2id benchmarking tooling; audit
+anomaly alerting; and an automated 32-check security smoke script.
+
+Still required by the operator or an external reviewer:
+
+1. Install a **trusted TLS certificate** (or configure a controlled upstream
+   TLS terminator with the trusted-proxy overlay). The local self-signed smoke
+   test proves the configuration, not production trust.
+2. Configure **off-site backup storage** (`RCLONE_REMOTE`) and repeat the
+   restore drill at the production site; record an RPO/RTO. Demo mode uses
+   `ALLOW_LOCAL_ONLY_BACKUPS=true` and public throwaway secrets.
+3. Re-run `benchmark_argon2.py` on the **target instance class** with realistic
+   concurrency and record the chosen parameters.
+4. Set real SMTP, MFA encryption, alert destinations, CORS/frontend origins and
+   rotate all demo credentials. Configure central log shipping and monitor
+   alert delivery.
+5. Complete a formal threat model/data-flow review for ASVS V1.
+6. Commission an **independent OWASP ASVS 5.0.0 Level 2 assessment** and an
+   **authorised penetration test** against staging. `ASVS_EVIDENCE.md` provides
+   the evidence pack and preparation checklist; it is not external sign-off.
 
 **No production-ready, hardened or compliant claim is made.** The stack is
 built and smoke-tested, and the controls above are implemented with automated
-and live verification, but the residual gaps require operator action and
+and live verification, but the remaining items require operator action and
 independent assurance before production use.
