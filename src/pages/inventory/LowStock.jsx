@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react'
 import { ArrowDownToLine, CircleAlert, PackageCheck, ShoppingCart } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../../lib/store'
-import { itemStatus, money, number, uid } from '../../lib/format'
+import { itemStatus, money, number } from '../../lib/format'
 import { Badge, Button, Card, EmptyState, Field, Modal, PageHeader, ProgressBar, StatCard, StatusPill } from '../../components/ui'
 
 export default function LowStock() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, businessWrite } = useStore()
   const [receiving, setReceiving] = useState(null)
   const [quantity, setQuantity] = useState('')
   const [error, setError] = useState('')
@@ -19,25 +19,24 @@ export default function LowStock() {
   const outCount = items.filter((item) => item.quantity <= 0).length
   const estimatedCost = items.reduce((sum, item) => sum + Math.max(item.minQuantity - item.quantity, 0) * item.purchaseCost, 0)
 
-  const receive = () => {
+  const receive = async () => {
     const amount = Number(quantity)
     if (!Number.isFinite(amount) || amount <= 0) return setError('Enter a quantity greater than zero.')
-    mutate((draft) => {
-      const item = draft.inventory.find((candidate) => candidate.id === receiving.id)
-      const previous = item.quantity
-      item.quantity = previous + amount
-      item.updatedAt = new Date().toISOString()
-      draft.movements.unshift({
-        id: uid('mov'), itemId: item.id, type: 'Purchase', quantity: amount, previousQuantity: previous,
-        newQuantity: item.quantity, date: new Date().toISOString(), userId: draft.sessionUserId,
-        reason: 'Quick stock receipt from low-stock alert', reference: uid('GRN').toUpperCase(),
-      })
-      addAudit(draft, 'STOCK_MOVEMENT', 'Inventory', `${amount} ${item.unit} of ${item.name} received`)
-    })
-    notify(`${receiving.name} stock increased by ${number(amount)} ${receiving.unit}.`)
-    setReceiving(null)
-    setQuantity('')
-    setError('')
+    const result = await businessWrite(
+      (api) => api.recordStockMovement(receiving.id, {
+        type: 'Purchase',
+        quantity: amount,
+        reason: 'Quick stock receipt from low-stock alert',
+      }),
+      `${receiving.name} stock increased by ${number(amount)} ${receiving.unit}.`,
+    )
+    if (result.ok) {
+      setReceiving(null)
+      setQuantity('')
+      setError('')
+    } else {
+      setError(result.message)
+    }
   }
 
   return (

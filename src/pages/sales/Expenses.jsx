@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { CircleDollarSign, Pencil, Plus, ReceiptText, Search, Trash2 } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { expensesByCategory, expensesInRange } from '../../lib/analytics'
-import { compactMoney, formatDate, inRange, money, number, periodRange, uid } from '../../lib/format'
+import { compactMoney, formatDate, inRange, money, number, periodRange } from '../../lib/format'
 import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, PeriodPicker, SearchInput, Select, StatCard } from '../../components/ui'
 
@@ -13,7 +13,7 @@ const blankExpense = () => ({
 })
 
 export default function Expenses() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, businessWrite, notify } = useStore()
   const [period, setPeriod] = useState('30d')
   const [custom, setCustom] = useState({ from: '', to: '' })
   const [search, setSearch] = useState('')
@@ -37,43 +37,43 @@ export default function Expenses() {
   const average = inPeriod.length ? total / inPeriod.length : 0
   const userName = (id) => data.users.find((user) => user.id === id)?.name || 'System'
 
-  const save = (form) => {
+  const save = async (form) => {
     if (!String(form.description || '').trim()) return notify('Description is required.', 'error')
     if (!isFiniteNumber(form.amount) || Number(form.amount) <= 0) return notify('Enter a valid amount greater than zero.', 'error')
     if (!isValidDateValue(form.date)) return notify('Enter a valid date.', 'error')
+    const payload = {
+      category: form.category,
+      description: form.description.trim(),
+      amount: Number(form.amount),
+      date: form.date,
+      paymentMethod: form.paymentMethod,
+      notes: form.notes,
+    }
     if (editing) {
-      mutate((draft) => {
-        Object.assign(draft.expenses.find((expense) => expense.id === editing.id), form, { amount: Number(form.amount) })
-        addAudit(draft, 'EXPENSE_UPDATED', 'Expense', `${editing.reference} corrected`)
-      })
-      notify('Expense updated.')
-      setEditing(null)
+      const result = await businessWrite(
+        (api) => api.updateBusinessRecord('expense', editing.id, payload),
+        'Expense updated.',
+      )
+      if (result.ok) setEditing(null)
     } else {
-      mutate((draft) => {
-        draft.expenses.unshift({
-          ...form, id: uid('exp'), reference: `EXP-${new Date().getFullYear()}-${String(draft.expenses.length + 1).padStart(3, '0')}`,
-          amount: Number(form.amount), recordedBy: draft.sessionUserId, createdAt: new Date().toISOString(),
-        })
-        addAudit(draft, 'EXPENSE_RECORDED', 'Expense', `${form.description} — ${money(Number(form.amount))}`)
-      })
-      notify('Expense recorded.')
-      setCreating(false)
+      const result = await businessWrite(
+        (api) => api.createBusinessRecord('expense', payload),
+        'Expense recorded.',
+      )
+      if (result.ok) setCreating(false)
     }
   }
 
-  const reverse = () => {
+  const reverse = async () => {
     if (!reversalReason.trim()) return notify('A reversal reason is required.', 'error')
-    mutate((draft) => {
-      const target = draft.expenses.find((expense) => expense.id === deleting.id)
-      target.reversed = true
-      target.reversalReason = reversalReason.trim()
-      target.reversedAt = new Date().toISOString()
-      target.reversedBy = draft.sessionUserId
-      addAudit(draft, 'EXPENSE_REVERSED', 'Expense', `${deleting.reference} reversed: ${reversalReason.trim()}`)
-    })
-    notify('Expense reversed and preserved in history.')
-    setDeleting(null)
-    setReversalReason('')
+    const result = await businessWrite(
+      (api) => api.reverseBusinessRecord('expense', deleting.id, reversalReason.trim()),
+      'Expense reversed and preserved in history.',
+    )
+    if (result.ok) {
+      setDeleting(null)
+      setReversalReason('')
+    }
   }
 
   return (

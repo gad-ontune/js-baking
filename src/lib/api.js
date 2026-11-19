@@ -158,6 +158,33 @@ export function createApiClient({
       request(`/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: 'POST' }),
     listAudit: async ({ limit = 100, offset = 0 } = {}) =>
       (await request(`/audit?limit=${limit}&offset=${offset}`)).map(mapAudit),
+
+    // Business records. The server owns ids, references, totals, stock levels
+    // and reversal state; the client only sends the raw user inputs.
+    businessSnapshot: () => request('/business/snapshot'),
+    listBusinessRecords: (kind) => request(`/business/${encodeURIComponent(kind)}`),
+    createBusinessRecord: (kind, payload) =>
+      request(`/business/${encodeURIComponent(kind)}`, { method: 'POST', body: payload }),
+    updateBusinessRecord: (kind, recordId, payload) =>
+      request(`/business/${encodeURIComponent(kind)}/${encodeURIComponent(recordId)}`, {
+        method: 'PATCH',
+        body: payload,
+      }),
+    reverseBusinessRecord: (kind, recordId, reason) =>
+      request(`/business/${encodeURIComponent(kind)}/${encodeURIComponent(recordId)}/reverse`, {
+        method: 'POST',
+        body: { reason },
+      }),
+    recordStockMovement: (itemId, payload) =>
+      request(`/business/inventory/${encodeURIComponent(itemId)}/movement`, {
+        method: 'POST',
+        body: payload,
+      }),
+    recordSupplierPayment: (purchaseId, payload) =>
+      request(`/business/purchase/${encodeURIComponent(purchaseId)}/payment`, {
+        method: 'POST',
+        body: payload,
+      }),
   }
 }
 

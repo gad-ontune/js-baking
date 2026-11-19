@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { inventorySummary, salesByProduct } from '../../lib/analytics'
-import { compactMoney, formatDate, itemStatus, money, number, statusLabel, uid } from '../../lib/format'
+import { compactMoney, formatDate, itemStatus, money, number, statusLabel } from '../../lib/format'
 import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import {
   Badge,
@@ -123,7 +123,7 @@ function ItemForm({ item, config, onSave, onClose }) {
 }
 
 function MovementDialog({ item, onClose }) {
-  const { mutate, addAudit, notify } = useStore()
+  const { businessWrite } = useStore()
   const [type, setType] = useState('Purchase')
   const [quantity, setQuantity] = useState('')
   const [reason, setReason] = useState('')
@@ -132,37 +132,24 @@ function MovementDialog({ item, onClose }) {
   const warningDays = 14
   const status = itemStatus(item, warningDays)
 
-  const submit = () => {
+  const submit = async () => {
     const amount = Number(quantity)
-    if (!Number.isFinite(amount) || amount < 0) return setError('Enter a valid quantity.')
+    if (!Number.isFinite(amount) || amount <= 0) return setError('Enter a quantity greater than zero.')
     if (type === 'Adjustment' && !reason.trim()) return setError('A reason is required for stock adjustments.')
-    let delta = amount
-    if (type === 'Adjustment') delta = amount - item.quantity
-    else if (type !== 'Purchase') delta = -amount
-    const nextQuantity = item.quantity + delta
-    if (nextQuantity < 0) return setError('This movement would make stock negative. Use an adjustment to set the correct quantity.')
 
-    mutate((draft) => {
-      const target = draft.inventory.find((candidate) => candidate.id === item.id)
-      const previous = target.quantity
-      target.quantity = Number(nextQuantity.toFixed(2))
-      target.updatedAt = new Date().toISOString()
-      draft.movements.unshift({
-        id: uid('mov'),
-        itemId: item.id,
+    // The server derives the stock delta from the movement type and rejects a
+    // resulting negative balance. No client-computed stock is trusted.
+    const result = await businessWrite(
+      (api) => api.recordStockMovement(item.id, {
         type,
-        quantity: Number(delta.toFixed(2)),
-        previousQuantity: previous,
-        newQuantity: target.quantity,
-        date: new Date().toISOString(),
-        userId: draft.sessionUserId,
+        quantity: amount,
         reason: reason.trim() || `${type} recorded from inventory`,
-        reference: reference.trim() || uid('REF').toUpperCase(),
-      })
-      addAudit(draft, 'STOCK_MOVEMENT', 'Inventory', `${type} of ${item.name} (${delta > 0 ? '+' : ''}${delta} ${item.unit})`)
-    })
-    notify(`${item.name} stock updated successfully.`)
-    onClose()
+        reference: reference.trim(),
+      }),
+      `${item.name} stock updated successfully.`,
+    )
+    if (result.ok) onClose()
+    else setError(result.message)
   }
 
   return (
@@ -232,7 +219,7 @@ function MovementHistory({ item, movements, onClose }) {
 }
 
 export default function Inventory() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, businessWrite } = useStore()
   const [searchParams] = useSearchParams()
   const [search, setSearch] = useState(searchParams.get('q') || '')
   const [category, setCategory] = useState('all')
@@ -256,43 +243,34 @@ export default function Inventory() {
     return haystack.includes(search.toLowerCase())
   }).sort((a, b) => a.name.localeCompare(b.name)), [data.inventory, search, category, status, showArchived, warningDays])
 
-  const saveItem = (form) => {
+  const saveItem = async (form) => {
     if (editing) {
-      mutate((draft) => {
-        const item = draft.inventory.find((candidate) => candidate.id === editing.id)
-        Object.assign(item, form, { updatedAt: new Date().toISOString() })
-        addAudit(draft, 'INVENTORY_UPDATED', 'Inventory', `${form.name} details updated`)
-      })
-      notify('Inventory item updated.')
-      setEditing(null)
+      const result = await businessWrite(
+        (api) => api.updateBusinessRecord('inventory', editing.id, {
+          name: form.name, code: form.code, category: form.category, unit: form.unit,
+          description: form.description, minQuantity: form.minQuantity,
+          purchaseCost: form.purchaseCost, sellingPrice: form.sellingPrice,
+          expiryDate: form.expiryDate,
+        }),
+        'Inventory item updated.',
+      )
+      if (result.ok) setEditing(null)
     } else {
-      const id = uid('inv')
-      mutate((draft) => {
-        draft.inventory.unshift({ ...form, id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archived: false })
-        if (form.quantity > 0) {
-          draft.movements.unshift({
-            id: uid('mov'), itemId: id, type: 'Opening Stock', quantity: form.quantity,
-            previousQuantity: 0, newQuantity: form.quantity, date: new Date().toISOString(),
-            userId: draft.sessionUserId, reason: 'Opening stock entered with new item', reference: uid('REF').toUpperCase(),
-          })
-        }
-        addAudit(draft, 'INVENTORY_CREATED', 'Inventory', `${form.name} added to inventory`)
-      })
-      notify('Inventory item added.')
-      setCreating(false)
+      const result = await businessWrite(
+        (api) => api.createBusinessRecord('inventory', form),
+        'Inventory item added.',
+      )
+      if (result.ok) setCreating(false)
     }
   }
 
-  const toggleArchive = () => {
+  const toggleArchive = async () => {
     const item = archiving
-    mutate((draft) => {
-      const target = draft.inventory.find((candidate) => candidate.id === item.id)
-      target.archived = !target.archived
-      target.updatedAt = new Date().toISOString()
-      addAudit(draft, target.archived ? 'INVENTORY_ARCHIVED' : 'INVENTORY_RESTORED', 'Inventory', `${item.name} ${target.archived ? 'archived' : 'restored'}`)
-    })
-    notify(`${item.name} ${item.archived ? 'restored' : 'archived'}.`)
-    setArchiving(null)
+    const result = await businessWrite(
+      (api) => api.updateBusinessRecord('inventory', item.id, { archived: !item.archived }),
+      `${item.name} ${item.archived ? 'restored' : 'archived'}.`,
+    )
+    if (result.ok) setArchiving(null)
   }
 
   return (

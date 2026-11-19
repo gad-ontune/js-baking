@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Apple, CalendarClock, TriangleAlert } from 'lucide-react'
 import { useStore } from '../../lib/store'
-import { daysUntil, formatDate, number, uid } from '../../lib/format'
+import { daysUntil, formatDate, number } from '../../lib/format'
 import { Badge, Button, Card, EmptyState, Field, Modal, PageHeader, StatCard, StatusPill } from '../../components/ui'
 
 export default function ExpiryTracking() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, businessWrite } = useStore()
   const [wasting, setWasting] = useState(null)
   const [quantity, setQuantity] = useState('')
   const [error, setError] = useState('')
@@ -23,26 +23,24 @@ export default function ExpiryTracking() {
     }
   }, [data.inventory, warningDays])
 
-  const recordWastage = () => {
+  const recordWastage = async () => {
     const amount = Number(quantity)
     if (!Number.isFinite(amount) || amount <= 0) return setError('Enter a quantity greater than zero.')
-    if (amount > wasting.quantity) return setError('Wastage cannot exceed current stock.')
-    mutate((draft) => {
-      const item = draft.inventory.find((candidate) => candidate.id === wasting.id)
-      const previous = item.quantity
-      item.quantity = previous - amount
-      item.updatedAt = new Date().toISOString()
-      draft.movements.unshift({
-        id: uid('mov'), itemId: item.id, type: 'Wastage', quantity: -amount, previousQuantity: previous,
-        newQuantity: item.quantity, date: new Date().toISOString(), userId: draft.sessionUserId,
-        reason: 'Expired or spoiled stock written off', reference: uid('WST').toUpperCase(),
-      })
-      addAudit(draft, 'STOCK_WASTAGE', 'Inventory', `${amount} ${item.unit} of ${item.name} written off`)
-    })
-    notify('Wastage recorded and stock updated.')
-    setWasting(null)
-    setQuantity('')
-    setError('')
+    const result = await businessWrite(
+      (api) => api.recordStockMovement(wasting.id, {
+        type: 'Wastage',
+        quantity: amount,
+        reason: 'Expired or spoiled stock written off',
+      }),
+      'Wastage recorded and stock updated.',
+    )
+    if (result.ok) {
+      setWasting(null)
+      setQuantity('')
+      setError('')
+    } else {
+      setError(result.message)
+    }
   }
 
   const section = (title, items, tone, note) => (

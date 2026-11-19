@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Banknote, Eye, FilePlus2, PackagePlus, Plus, Receipt, RotateCcw, Search, Truck } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { expensesByCategory } from '../../lib/analytics'
-import { formatDate, inRange, money, number, periodRange, uid } from '../../lib/format'
+import { formatDate, inRange, money, number, periodRange } from '../../lib/format'
 import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import {
   Badge,
@@ -194,26 +194,22 @@ function PurchaseDetails({ purchase, data, onClose, onPay, onVoid, onEditNotes }
 }
 
 function PaymentDialog({ purchase, onClose }) {
-  const { mutate, addAudit, notify } = useStore()
+  const { businessWrite } = useStore()
   const [amount, setAmount] = useState(String(purchase.balance))
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [method, setMethod] = useState('Cash')
   const [error, setError] = useState('')
 
-  const submit = () => {
+  const submit = async () => {
     const value = Number(amount)
     if (!Number.isFinite(value) || value <= 0) return setError('Enter a valid payment amount.')
     if (value > purchase.balance) return setError('Payment cannot exceed the outstanding balance.')
-    mutate((draft) => {
-      const target = draft.purchases.find((entry) => entry.id === purchase.id)
-      target.paidAmount += value
-      target.balance = target.total - target.paidAmount
-      target.status = target.balance <= 0 ? 'Paid' : target.paidAmount > 0 ? 'Partially paid' : 'Unpaid'
-      target.payments.push({ id: uid('pay'), amount: value, date: new Date(date).toISOString(), method, reference: uid('PAY').toUpperCase() })
-      addAudit(draft, 'SUPPLIER_PAYMENT', 'Purchase', `${money(value)} paid toward ${purchase.reference}`)
-    })
-    notify('Supplier payment recorded.')
-    onClose()
+    const result = await businessWrite(
+      (api) => api.recordSupplierPayment(purchase.id, { amount: value, date, method }),
+      'Supplier payment recorded.',
+    )
+    if (result.ok) onClose()
+    else setError(result.message)
   }
 
   return (
@@ -237,7 +233,7 @@ function PaymentDialog({ purchase, onClose }) {
 }
 
 export default function Purchases() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, businessWrite } = useStore()
   const [period, setPeriod] = useState('30d')
   const [custom, setCustom] = useState({ from: '', to: '' })
   const [supplierFilter, setSupplierFilter] = useState('all')
@@ -269,65 +265,40 @@ export default function Purchases() {
     }
   }, [filtered])
 
-  const createPurchase = (form) => {
-    const reference = `PUR-${new Date().getFullYear()}-${String(data.purchases.length + 1).padStart(3, '0')}`
-    const date = new Date(form.date).toISOString()
-    mutate((draft) => {
-      const purchase = {
-        id: uid('pur'), reference, supplierId: form.supplierId, date,
-        items: form.lines, subtotal: form.subtotal, discount: form.discount, charges: form.charges,
-        total: form.total, status: 'Unpaid', paidAmount: 0, balance: form.total,
-        payments: [], notes: form.notes, voided: false, createdBy: draft.sessionUserId, createdAt: new Date().toISOString(),
-      }
-      draft.purchases.unshift(purchase)
-      form.lines.forEach((line) => {
-        const item = draft.inventory.find((candidate) => candidate.id === line.itemId)
-        const previous = item.quantity
-        item.quantity = previous + line.quantity
-        item.updatedAt = date
-        draft.movements.unshift({
-          id: uid('mov'), itemId: item.id, type: 'Purchase', quantity: line.quantity, previousQuantity: previous,
-          newQuantity: item.quantity, date, userId: draft.sessionUserId,
-          reason: `Purchase ${reference} — ${data.suppliers.find((s) => s.id === form.supplierId)?.name || 'supplier'}`, reference,
-        })
-      })
-      addAudit(draft, 'PURCHASE_CREATED', 'Purchase', `${reference} confirmed for ${money(form.total)}`)
-    })
-    notify('Purchase confirmed. Inventory has been updated.')
-    setCreating(false)
+  const createPurchase = async (form) => {
+    const result = await businessWrite(
+      (api) => api.createBusinessRecord('purchase', {
+        supplierId: form.supplierId,
+        date: form.date,
+        items: form.lines.map((line) => ({
+          itemId: line.itemId, quantity: line.quantity, unitCost: line.unitCost,
+        })),
+        discount: form.discount,
+        charges: form.charges,
+        notes: form.notes,
+      }),
+      'Purchase confirmed. Inventory has been updated.',
+    )
+    if (result.ok) setCreating(false)
   }
 
-  const voidPurchase = () => {
-    mutate((draft) => {
-      const purchase = draft.purchases.find((entry) => entry.id === voiding.id)
-      purchase.voided = true
-      purchase.status = 'Voided'
-      purchase.items.forEach((line) => {
-        const item = draft.inventory.find((candidate) => candidate.id === line.itemId)
-        const previous = item.quantity
-        item.quantity = previous - line.quantity
-        item.updatedAt = new Date().toISOString()
-        draft.movements.unshift({
-          id: uid('mov'), itemId: item.id, type: 'Adjustment', quantity: -line.quantity, previousQuantity: previous,
-          newQuantity: item.quantity, date: new Date().toISOString(), userId: draft.sessionUserId,
-          reason: `Reversal of voided purchase ${purchase.reference}`, reference: `VOID-${purchase.reference}`,
-        })
-      })
-      addAudit(draft, 'PURCHASE_VOIDED', 'Purchase', `${purchase.reference} voided and inventory reversed`)
-    })
-    notify('Purchase voided. Inventory and balances reversed.')
-    setVoiding(null)
-    setDetails(null)
+  const voidPurchase = async () => {
+    const result = await businessWrite(
+      (api) => api.reverseBusinessRecord('purchase', voiding.id, 'Purchase voided by user'),
+      'Purchase voided. Inventory and balances reversed.',
+    )
+    if (result.ok) {
+      setVoiding(null)
+      setDetails(null)
+    }
   }
 
-  const saveNotes = () => {
-    mutate((draft) => {
-      const purchase = draft.purchases.find((entry) => entry.id === editingNotes.id)
-      purchase.notes = notes
-      addAudit(draft, 'PURCHASE_UPDATED', 'Purchase', `Notes updated for ${purchase.reference}`)
-    })
-    notify('Purchase notes updated.')
-    setEditingNotes(null)
+  const saveNotes = async () => {
+    const result = await businessWrite(
+      (api) => api.updateBusinessRecord('purchase', editingNotes.id, { notes }),
+      'Purchase notes updated.',
+    )
+    if (result.ok) setEditingNotes(null)
   }
 
   const supplierName = (id) => data.suppliers.find((supplier) => supplier.id === id)?.name || '—'

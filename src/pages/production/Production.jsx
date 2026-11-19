@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { Factory, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { productionSummary } from '../../lib/analytics'
-import { formatDate, inRange, number, periodRange, uid } from '../../lib/format'
+import { formatDate, inRange, number, periodRange } from '../../lib/format'
 import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, PeriodPicker, SearchInput, Select, StatCard } from '../../components/ui'
 
@@ -13,7 +13,7 @@ const blankRecord = () => ({
 })
 
 export default function Production() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, businessWrite, notify } = useStore()
   const [period, setPeriod] = useState('30d')
   const [custom, setCustom] = useState({ from: '', to: '' })
   const [search, setSearch] = useState('')
@@ -33,43 +33,43 @@ export default function Production() {
   const productNames = useMemo(() => [...new Set(data.production.map((record) => record.productName))].sort(), [data.production])
   const userName = (id) => data.users.find((user) => user.id === id)?.name || 'System'
 
-  const save = (form) => {
+  const save = async (form) => {
     if (!String(form.productName || '').trim()) return notify('Product name is required.', 'error')
     if (!isFiniteNumber(form.quantity) || Number(form.quantity) <= 0) return notify('Enter a valid quantity greater than zero.', 'error')
     if (!isValidDateValue(form.date)) return notify('Enter a valid date.', 'error')
+    const payload = {
+      productName: form.productName.trim(),
+      category: form.category,
+      quantity: Number(form.quantity),
+      date: form.date,
+      description: form.description,
+      notes: form.notes,
+    }
     if (editing) {
-      mutate((draft) => {
-        Object.assign(draft.production.find((record) => record.id === editing.id), form, { date: new Date(form.date).toISOString() })
-        addAudit(draft, 'PRODUCTION_UPDATED', 'Production', `${form.quantity} × ${form.productName} record corrected`)
-      })
-      notify('Production record updated.')
-      setEditing(null)
+      const result = await businessWrite(
+        (api) => api.updateBusinessRecord('production', editing.id, payload),
+        'Production record updated.',
+      )
+      if (result.ok) setEditing(null)
     } else {
-      mutate((draft) => {
-        draft.production.unshift({
-          ...form, id: uid('prd'), date: new Date(form.date).toISOString(),
-          recordedBy: draft.sessionUserId, createdAt: new Date().toISOString(),
-        })
-        addAudit(draft, 'PRODUCTION_CREATED', 'Production', `${form.quantity} × ${form.productName} recorded`)
-      })
-      notify('Production record added.')
-      setCreating(false)
+      const result = await businessWrite(
+        (api) => api.createBusinessRecord('production', payload),
+        'Production record added.',
+      )
+      if (result.ok) setCreating(false)
     }
   }
 
-  const reverse = () => {
+  const reverse = async () => {
     if (!reversalReason.trim()) return notify('A reversal reason is required.', 'error')
-    mutate((draft) => {
-      const target = draft.production.find((record) => record.id === deleting.id)
-      target.reversed = true
-      target.reversalReason = reversalReason.trim()
-      target.reversedAt = new Date().toISOString()
-      target.reversedBy = draft.sessionUserId
-      addAudit(draft, 'PRODUCTION_REVERSED', 'Production', `${deleting.productName} record reversed: ${reversalReason.trim()}`)
-    })
-    notify('Production record reversed and preserved in history.')
-    setDeleting(null)
-    setReversalReason('')
+    const result = await businessWrite(
+      (api) => api.reverseBusinessRecord('production', deleting.id, reversalReason.trim()),
+      'Production record reversed and preserved in history.',
+    )
+    if (result.ok) {
+      setDeleting(null)
+      setReversalReason('')
+    }
   }
 
   return (

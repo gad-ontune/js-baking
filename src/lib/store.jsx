@@ -51,6 +51,17 @@ export function StoreProvider({ children }) {
     }
   }, [data])
 
+  /** Replace local demo collections with the authoritative server snapshot. */
+  const hydrateBusiness = useCallback(async () => {
+    try {
+      const snapshot = await api.businessSnapshot()
+      setData((previous) => ({ ...previous, ...snapshot }))
+    } catch {
+      // Keep the local demo data when the API is unavailable or the session
+      // has ended. The backend remains the authority whenever it responds.
+    }
+  }, [])
+
   /** Merge the authoritative backend directory with local users referenced by demo history. */
   const setDirectory = useCallback((users) => {
     const incoming = Array.isArray(users) ? users : []
@@ -76,6 +87,7 @@ export function StoreProvider({ children }) {
         setCurrentUser(user)
         setAuthStatus('authenticated')
         setApiAvailable(true)
+        hydrateBusiness()
         api.listUsers().then((users) => { if (active) setDirectory(users) }).catch(() => {
           // Non-owners cannot list users; their own record is still authoritative.
           if (active) setDirectory([user])
@@ -89,7 +101,7 @@ export function StoreProvider({ children }) {
       })
 
     return () => { active = false }
-  }, [setDirectory])
+  }, [setDirectory, hydrateBusiness])
 
   // Keep the backend idle window alive while a tab is open, and notice remote
   // logout, deactivation or role changes without relying on browser state.
@@ -121,6 +133,22 @@ export function StoreProvider({ children }) {
   const dismissToast = useCallback((id) => {
     setToasts((current) => current.filter((toast) => toast.id !== id))
   }, [])
+
+  /** Perform a business write on the server, then refresh from the server. */
+  const businessWrite = useCallback(
+    async (operation, successMessage) => {
+      try {
+        const result = await operation(api)
+        await hydrateBusiness()
+        if (successMessage) notify(successMessage)
+        return { ok: true, result }
+      } catch (error) {
+        notify(error.message || 'The change could not be saved.', 'error')
+        return { ok: false, message: error.message }
+      }
+    },
+    [hydrateBusiness, notify],
+  )
 
   /** Apply a change to an isolated draft, keeping local demo history consistent. */
   const mutate = useCallback((recipe) => {
@@ -158,6 +186,7 @@ export function StoreProvider({ children }) {
         setCurrentUser(result.user)
         setAuthStatus('authenticated')
         setApiAvailable(true)
+        hydrateBusiness()
         api.listUsers().then(setDirectory).catch(() => setDirectory([result.user]))
         return { ok: true, user: result.user }
       } catch (error) {
@@ -168,7 +197,7 @@ export function StoreProvider({ children }) {
         }
       }
     },
-    [setDirectory],
+    [setDirectory, hydrateBusiness],
   )
 
   const signOut = useCallback(async () => {
@@ -211,6 +240,8 @@ export function StoreProvider({ children }) {
       data,
       mutate,
       addAudit,
+      businessWrite,
+      hydrateBusiness,
       notify,
       toasts,
       dismissToast,
@@ -225,7 +256,7 @@ export function StoreProvider({ children }) {
       resetDemo,
       setDirectory,
     }),
-    [data, mutate, addAudit, notify, toasts, dismissToast, currentUser, authStatus, apiAvailable, can, signIn, signOut, changePassword, touchSession, resetDemo, setDirectory],
+    [data, mutate, addAudit, businessWrite, hydrateBusiness, notify, toasts, dismissToast, currentUser, authStatus, apiAvailable, can, signIn, signOut, changePassword, touchSession, resetDemo, setDirectory],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

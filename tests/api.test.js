@@ -84,6 +84,34 @@ test('client methods use the expected routes and encode user ids', async () => {
   ])
 })
 
+test('business helpers use server-authoritative routes and send CSRF on writes', async () => {
+  const { calls, fetchImpl } = mockFetch(jsonResponse({ ok: true }))
+  const client = createApiClient({ fetchImpl, getCookie: () => 'jsbh_csrf=csrf-token-42' })
+
+  await client.businessSnapshot()
+  await client.createBusinessRecord('sale', { date: '2026-01-01', items: [] })
+  await client.updateBusinessRecord('expense', 'exp-1', { amount: 100 })
+  await client.reverseBusinessRecord('sale', 'sal 1', 'customer return')
+  await client.recordStockMovement('inv 1', { type: 'Purchase', quantity: 5 })
+  await client.recordSupplierPayment('pur-1', { amount: 250, method: 'Cash' })
+
+  assert.deepEqual(calls.map((call) => `${call.options.method} ${call.url}`), [
+    'GET /api/v1/business/snapshot',
+    'POST /api/v1/business/sale',
+    'PATCH /api/v1/business/expense/exp-1',
+    'POST /api/v1/business/sale/sal%201/reverse',
+    'POST /api/v1/business/inventory/inv%201/movement',
+    'POST /api/v1/business/purchase/pur-1/payment',
+  ])
+  // Reads carry no CSRF header; every write does.
+  assert.equal(calls[0].options.headers['X-CSRF-Token'], undefined)
+  for (const call of calls.slice(1)) {
+    assert.equal(call.options.headers['X-CSRF-Token'], 'csrf-token-42')
+  }
+  assert.deepEqual(JSON.parse(calls[1].options.body), { date: '2026-01-01', items: [] })
+  assert.deepEqual(JSON.parse(calls[3].options.body), { reason: 'customer return' })
+})
+
 test('API errors expose status and detail without echoing request secrets', async () => {
   const secret = 'SuperSecretPassword123'
   const fetchImpl = async () => jsonResponse({ detail: 'Incorrect username or password.' }, 401)

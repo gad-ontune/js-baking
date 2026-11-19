@@ -2,13 +2,13 @@ import { useMemo, useState } from 'react'
 import { Archive, Building2, Eye, Mail, MapPin, Pencil, Phone, Plus, Search, Truck } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { supplierBalances } from '../../lib/analytics'
-import { formatDate, money, number, uid } from '../../lib/format'
+import { formatDate, money, number } from '../../lib/format'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, SearchInput, Select, StatCard, StatusPill } from '../../components/ui'
 
 const blankSupplier = { name: '', businessName: '', phone: '', email: '', location: '', description: '', status: 'Active' }
 
 export default function Suppliers() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, businessWrite, notify } = useStore()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [editing, setEditing] = useState(null)
@@ -29,33 +29,38 @@ export default function Suppliers() {
     balance: balances.reduce((sum, entry) => sum + entry.balance, 0),
   }), [data.suppliers, balances])
 
-  const save = (form) => {
+  const save = async (form) => {
     if (!form.name.trim()) return notify('Supplier name is required.', 'error')
+    const payload = {
+      name: form.name.trim(),
+      businessName: form.businessName,
+      phone: form.phone,
+      email: form.email,
+      location: form.location,
+      description: form.description,
+    }
     if (editing) {
-      mutate((draft) => {
-        Object.assign(draft.suppliers.find((supplier) => supplier.id === editing.id), form, { name: form.name.trim() })
-        addAudit(draft, 'SUPPLIER_UPDATED', 'Supplier', `${form.name} details updated`)
-      })
-      notify('Supplier updated.')
-      setEditing(null)
+      const result = await businessWrite(
+        (api) => api.updateBusinessRecord('supplier', editing.id, payload),
+        'Supplier updated.',
+      )
+      if (result.ok) setEditing(null)
     } else {
-      mutate((draft) => {
-        draft.suppliers.unshift({ ...form, id: uid('sup'), name: form.name.trim(), createdAt: new Date().toISOString() })
-        addAudit(draft, 'SUPPLIER_CREATED', 'Supplier', `${form.name} added`)
-      })
-      notify('Supplier added.')
-      setCreating(false)
+      const result = await businessWrite(
+        (api) => api.createBusinessRecord('supplier', payload),
+        'Supplier added.',
+      )
+      if (result.ok) setCreating(false)
     }
   }
 
-  const toggleArchive = () => {
-    mutate((draft) => {
-      const supplier = draft.suppliers.find((entry) => entry.id === archiving.id)
-      supplier.status = supplier.status === 'Active' ? 'Archived' : 'Active'
-      addAudit(draft, 'SUPPLIER_STATUS', 'Supplier', `${supplier.name} set to ${supplier.status}`)
-    })
-    notify('Supplier status updated.')
-    setArchiving(null)
+  const toggleArchive = async () => {
+    const nextStatus = archiving.status === 'Active' ? 'Inactive' : 'Active'
+    const result = await businessWrite(
+      (api) => api.updateBusinessRecord('supplier', archiving.id, { status: nextStatus }),
+      'Supplier status updated.',
+    )
+    if (result.ok) setArchiving(null)
   }
 
   const supplierForm = (editing || creating) && (
@@ -86,7 +91,7 @@ export default function Suppliers() {
         <div className="grid gap-3 sm:grid-cols-[1fr_180px]">
           <SearchInput value={search} onChange={setSearch} placeholder="Search suppliers…" />
           <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="all">All statuses</option><option>Active</option><option>Archived</option>
+            <option value="all">All statuses</option><option>Active</option><option>Inactive</option>
           </Select>
         </div>
       </Card>
@@ -111,7 +116,7 @@ export default function Suppliers() {
                       <div className="flex justify-end gap-1">
                         <IconButton icon={Eye} label="View details" onClick={() => setViewing(supplier)} />
                         <IconButton icon={Pencil} label="Edit supplier" onClick={() => setEditing(supplier)} />
-                        <IconButton icon={Archive} label={supplier.status === 'Active' ? 'Archive' : 'Reactivate'} onClick={() => setArchiving(supplier)} />
+                        <IconButton icon={Archive} label={supplier.status === 'Active' ? 'Deactivate' : 'Reactivate'} onClick={() => setArchiving(supplier)} />
                       </div>
                     </td>
                   </tr>
@@ -129,9 +134,9 @@ export default function Suppliers() {
           open
           onClose={() => setArchiving(null)}
           onConfirm={toggleArchive}
-          title={archiving.status === 'Active' ? 'Archive this supplier?' : 'Reactivate this supplier?'}
+          title={archiving.status === 'Active' ? 'Deactivate this supplier?' : 'Reactivate this supplier?'}
           description="Existing purchase history will always remain available."
-          confirmLabel={archiving.status === 'Active' ? 'Archive' : 'Reactivate'}
+          confirmLabel={archiving.status === 'Active' ? 'Deactivate' : 'Reactivate'}
         />
       )}
     </div>
@@ -160,7 +165,7 @@ function SupplierForm({ supplier, onClose, onSave }) {
         <Field label="Phone number"><input className="input" value={form.phone} onChange={(event) => set('phone', event.target.value)} /></Field>
         <Field label="Email address"><input type="email" className="input" value={form.email} onChange={(event) => set('email', event.target.value)} /></Field>
         <Field label="Physical location"><input className="input" value={form.location} onChange={(event) => set('location', event.target.value)} /></Field>
-        <Field label="Status"><Select value={form.status} onChange={(event) => set('status', event.target.value)}><option>Active</option><option>Archived</option></Select></Field>
+        <Field label="Status"><Select value={form.status} onChange={(event) => set('status', event.target.value)}><option>Active</option><option>Inactive</option></Select></Field>
         <Field label="Description" className="sm:col-span-2"><textarea className="input min-h-20" value={form.description} onChange={(event) => set('description', event.target.value)} /></Field>
       </div>
     </Modal>

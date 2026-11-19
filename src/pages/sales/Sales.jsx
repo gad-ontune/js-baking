@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Banknote, Eye, Plus, ReceiptText, RotateCcw, Search, ShoppingBag } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { financialSummary, salesByPaymentMethod } from '../../lib/analytics'
-import { formatDate, formatDateTime, inRange, money, number, periodRange, uid } from '../../lib/format'
+import { formatDate, formatDateTime, inRange, money, number, periodRange } from '../../lib/format'
 import { isFiniteNumber, isValidDateValue } from '../../lib/security'
 import {
   Badge,
@@ -226,7 +226,7 @@ function SaleDetails({ sale, data, onClose, onVoid }) {
 }
 
 export default function Sales() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, businessWrite } = useStore()
   const [period, setPeriod] = useState('30d')
   const [custom, setCustom] = useState({ from: '', to: '' })
   const [search, setSearch] = useState('')
@@ -249,96 +249,39 @@ export default function Sales() {
     return `${sale.reference} ${sale.items.map((line) => line.name).join(' ')} ${sale.notes}`.toLowerCase().includes(search.toLowerCase())
   }), [data.sales, range, showVoided, paymentFilter, productFilter, search])
 
-  const createSale = (form) => {
-    const reference = `SAL-${new Date().getFullYear()}-${String(data.sales.length + 1).padStart(3, '0')}`
-    const date = new Date(form.date).toISOString()
-    const createdProducts = []
-
-    mutate((draft) => {
-      const saleLines = form.lines.map((line) => {
-        let product = draft.products.find((candidate) => candidate.id === line.productId)
-        if (!product && line.productName) {
-          product = draft.products.find((candidate) => candidate.name.toLowerCase() === line.productName.trim().toLowerCase())
-        }
-        if (!product) {
-          const name = line.productName.trim()
-          product = {
-            id: uid('prod'),
-            sku: `PRD-${String(draft.products.length + 1).padStart(3, '0')}`,
-            name,
-            category: 'Other',
-            description: 'Added directly from a sales record',
-            cost: 0,
-            price: Number(line.unitPrice) || 0,
-            trackedItemId: null,
-            archived: false,
-            createdAt: new Date().toISOString(),
-          }
-          draft.products.push(product)
-          createdProducts.push(name)
-          addAudit(draft, 'PRODUCT_CREATED', 'Product', `${name} added to catalogue from sale ${reference}`)
-        }
-        return {
-          ...line,
-          productId: product.id,
-          productName: product.name,
-          name: product.name,
-          unitCost: product.cost || 0,
-        }
-      })
-
-      const saleCost = saleLines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0)
-      draft.sales.unshift({
-        id: uid('sal'), reference, date, items: saleLines, subtotal: form.subtotal, discount: form.discount,
-        total: form.total, cost: saleCost, paymentMethod: form.paymentMethod, notes: form.notes,
-        voided: false, createdBy: draft.sessionUserId, createdAt: new Date().toISOString(),
-      })
-
-      saleLines.forEach((line) => {
-        const product = draft.products.find((candidate) => candidate.id === line.productId)
-        if (!product?.trackedItemId) return
-        const item = draft.inventory.find((candidate) => candidate.id === product.trackedItemId)
-        const previous = item.quantity
-        item.quantity = previous - line.quantity
-        item.updatedAt = date
-        draft.movements.unshift({
-          id: uid('mov'), itemId: item.id, type: 'Sale', quantity: -line.quantity, previousQuantity: previous,
-          newQuantity: item.quantity, date, userId: draft.sessionUserId,
-          reason: `Sale ${reference} — ${product.name}`, reference,
-        })
-      })
-      addAudit(draft, 'SALE_RECORDED', 'Sale', `${reference} recorded for ${money(form.total)}`)
-    })
-
-    notify(createdProducts.length
-      ? `Sale completed. New product${createdProducts.length === 1 ? '' : 's'} added to your catalogue.`
-      : 'Sale completed. Revenue and stock updated.')
-    setCreating(false)
-    setFormError('')
+  const createSale = async (form) => {
+    const result = await businessWrite(
+      (api) => api.createBusinessRecord('sale', {
+        date: form.date,
+        items: form.lines.map((line) => ({
+          productId: line.productId || null,
+          productName: line.productName || '',
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+        })),
+        discount: form.discount,
+        paymentMethod: form.paymentMethod,
+        notes: form.notes,
+      }),
+      'Sale completed. Revenue and stock updated.',
+    )
+    if (result.ok) {
+      setCreating(false)
+      setFormError('')
+    } else {
+      setFormError(result.message)
+    }
   }
 
-  const voidSale = () => {
-    mutate((draft) => {
-      const sale = draft.sales.find((entry) => entry.id === voiding.id)
-      sale.voided = true
-      sale.items.forEach((line) => {
-        const product = draft.products.find((candidate) => candidate.id === line.productId)
-        if (!product?.trackedItemId) return
-        const item = draft.inventory.find((candidate) => candidate.id === product.trackedItemId)
-        const previous = item.quantity
-        item.quantity = previous + line.quantity
-        item.updatedAt = new Date().toISOString()
-        draft.movements.unshift({
-          id: uid('mov'), itemId: item.id, type: 'Adjustment', quantity: line.quantity, previousQuantity: previous,
-          newQuantity: item.quantity, date: new Date().toISOString(), userId: draft.sessionUserId,
-          reason: `Reversal of voided sale ${sale.reference}`, reference: `VOID-${sale.reference}`,
-        })
-      })
-      addAudit(draft, 'SALE_VOIDED', 'Sale', `${sale.reference} voided and stock restored`)
-    })
-    notify('Sale voided. Stock and reports updated.')
-    setVoiding(null)
-    setDetails(null)
+  const voidSale = async () => {
+    const result = await businessWrite(
+      (api) => api.reverseBusinessRecord('sale', voiding.id, 'Sale voided by user'),
+      'Sale voided. Stock and reports updated.',
+    )
+    if (result.ok) {
+      setVoiding(null)
+      setDetails(null)
+    }
   }
 
   return (
