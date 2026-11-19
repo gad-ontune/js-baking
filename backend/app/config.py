@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     environment: str = 'development'
 
     database_url: str = 'sqlite:///./jsbh_dev.db'
+    # Deployment databases use three roles: a bootstrap superuser (provisioning
+    # only), a schema owner used by Alembic, and a restricted runtime account
+    # used by the API. All three default to database_url for local development.
+    bootstrap_database_url: str = ''
+    migration_database_url: str = ''
     # Set to false in deployments where Alembic owns the schema.
     auto_create_schema: bool = True
     cors_origins: str = (
@@ -70,6 +75,14 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
+
+    @property
+    def bootstrap_url(self) -> str:
+        return self.bootstrap_database_url or self.database_url
+
+    @property
+    def migration_url(self) -> str:
+        return self.migration_database_url or self.database_url
 
     @property
     def is_production(self) -> bool:

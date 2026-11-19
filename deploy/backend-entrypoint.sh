@@ -1,11 +1,26 @@
 #!/bin/sh
 # Startup tasks for the API container. Everything runs before the first
-# worker accepts traffic, so a failed migration stops the deployment.
+# worker accepts traffic, so a failed provisioning, migration or grant stops
+# the deployment.
 set -eu
 
 cd /app/backend
+
+# 1. Create the dedicated schema-owner and runtime roles (no-op on SQLite).
+if [ -n "${BOOTSTRAP_DATABASE_URL:-}" ]; then
+  echo '[jsbh] Provisioning database roles...'
+  python /app/backend/scripts/provision_database.py
+fi
+
+# 2. Apply migrations as the schema owner, never as the runtime API role.
 echo '[jsbh] Applying database migrations...'
 alembic upgrade head
+
+# 3. Refresh grants so new tables are covered and audit_logs stays append-only.
+if [ -n "${MIGRATION_DATABASE_URL:-}" ]; then
+  echo '[jsbh] Applying least-privilege runtime grants...'
+  python /app/backend/scripts/grant_runtime_permissions.py
+fi
 
 # Optional one-time bootstrap of the first owner, from environment variables.
 # Exit code 1 means the username already exists and is not an error on restart.

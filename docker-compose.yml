@@ -6,7 +6,9 @@ name: js-baking-house
 
 services:
   db:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: deploy/db.Dockerfile
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-jsbh}
@@ -52,7 +54,16 @@ services:
         condition: service_healthy
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-production}
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-jsbh}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-jsbh}
+      # Three distinct database identities: bootstrap is used only to create
+      # the roles, migrations run as the owner, and the API uses the runtime
+      # role, which cannot change audit records or the schema.
+      BOOTSTRAP_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-jsbh}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-jsbh}?sslmode=require
+      MIGRATION_DATABASE_URL: postgresql+psycopg://${JSBH_OWNER_USER:-jsbh_owner}:${JSBH_OWNER_PASSWORD:?Set JSBH_OWNER_PASSWORD in .env}@db:5432/${POSTGRES_DB:-jsbh}?sslmode=require
+      DATABASE_URL: postgresql+psycopg://${JSBH_APP_USER:-jsbh_app}:${JSBH_APP_PASSWORD:?Set JSBH_APP_PASSWORD in .env}@db:5432/${POSTGRES_DB:-jsbh}?sslmode=require
+      JSBH_OWNER_USER: ${JSBH_OWNER_USER:-jsbh_owner}
+      JSBH_OWNER_PASSWORD: ${JSBH_OWNER_PASSWORD:?Set JSBH_OWNER_PASSWORD in .env}
+      JSBH_APP_USER: ${JSBH_APP_USER:-jsbh_app}
+      JSBH_APP_PASSWORD: ${JSBH_APP_PASSWORD:?Set JSBH_APP_PASSWORD in .env}
       AUTO_CREATE_SCHEMA: 'false'
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}

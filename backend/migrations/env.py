@@ -13,7 +13,8 @@ from backend.app.config import settings  # noqa: E402
 from backend.app.database import Base  # noqa: E402
 
 config = context.config
-config.set_main_option('sqlalchemy.url', settings.database_url.replace('%', '%%'))
+# Schema changes run as the dedicated owner role, never as the runtime API role.
+config.set_main_option('sqlalchemy.url', settings.migration_url.replace('%', '%%'))
 target_metadata = Base.metadata
 
 
