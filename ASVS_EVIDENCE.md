@@ -94,7 +94,7 @@ compliance claim.
 | Least-privilege DB roles | `verify_database_hardening.py` | Bootstrap only provisions; Alembic uses `jsbh_owner`; API uses `jsbh_app` without schema rights or audit `UPDATE`/`DELETE`. |
 | Schema ownership | `alembic upgrade head && alembic check` | Clean; runtime sets `AUTO_CREATE_SCHEMA=false`. |
 | Edge request filtering | `deploy/security-smoke.sh` | 405 for PUT, 403 for dotfiles/scanners, 400 for traversal/null bytes, nginx version hidden. |
-| CI gates | `.github/workflows/ci.yml` | Tests, lint, build, npm audit, pip-audit, Bandit, Alembic check, Gitleaks, Semgrep on every push/PR. |
+| CI gates | `.github/workflows/ci.yml` | Tests, lint, build, npm audit, pip-audit, Bandit, Alembic check, all Compose config variants, Gitleaks, Semgrep and a `compose-smoke` job (DB hardening + 32 security smoke checks) on every push/PR. |
 
 ---
 

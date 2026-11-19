@@ -64,8 +64,46 @@ jobs:
           .venv/bin/alembic upgrade head
           .venv/bin/alembic current
           .venv/bin/alembic check
-      - name: Validate Docker Compose definition
-        run: docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet
+      - name: Validate Docker Compose definitions
+        run: |
+          docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.demo.yml config --quiet
+          TLS_DOMAIN=localhost TLS_EMAIL=dev@example.com \
+            docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.tls.yml config --quiet
+          TRUSTED_PROXY_CIDR=10.0.0.0/8 \
+            docker compose --env-file deploy/demo.env.example -f docker-compose.yml -f docker-compose.trusted-proxy.yml config --quiet
+
+  compose-smoke:
+    name: Compose stack (security smoke and DB hardening)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the demo stack
+        run: |
+          docker compose --env-file deploy/demo.env.example \
+            -f docker-compose.yml -f docker-compose.demo.yml up --build -d
+      - name: Wait for the API to become healthy
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              echo 'API is healthy'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'API did not become healthy' >&2
+          exit 1
+      - name: Verify deployed database hardening
+        run: |
+          docker compose --env-file deploy/demo.env.example \
+            -f docker-compose.yml -f docker-compose.demo.yml run --rm \
+            --entrypoint python backend backend/scripts/verify_database_hardening.py
+      - name: Run automated security smoke checks
+        run: BASE_URL=http://127.0.0.1:8080 deploy/security-smoke.sh
+      - name: Show stack logs on failure
+        if: failure()
+        run: |
+          docker compose --env-file deploy/demo.env.example \
+            -f docker-compose.yml -f docker-compose.demo.yml logs --tail=200
 
   secret-scan:
     name: Gitleaks

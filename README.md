@@ -420,7 +420,9 @@ BACKUP_ENV_FILE=deploy/demo.env.example BACKUP_EXTRA_FILES='-f docker-compose.de
 ```
 
 CI runs the test, lint, build, dependency and static-analysis gates on every
-push, plus Gitleaks secret scanning and Semgrep.
+push, plus Gitleaks, Semgrep, Compose config validation for all overlays and a
+`compose-smoke` job that starts the demo stack, verifies database hardening and
+runs `deploy/security-smoke.sh`.
 
 `SECURITY_ASSESSMENT.md` contains the full audit and implementation record.
 `ASVS_EVIDENCE.md` records the self-assessment evidence, operator steps and

@@ -17,4 +17,7 @@ paths = [
   '''docker-compose\.yml''',
   '''docker-compose\.demo\.yml''',
   '''deploy/demo\.env\.example''',
+  # Contains the public demo credential literal only to assert it is absent
+  # from the deployed HTML. It is not a secret.
+  '''deploy/security-smoke\.sh''',
 ]
