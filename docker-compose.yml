@@ -96,6 +96,35 @@ services:
       start_period: 30s
     networks: [data, web]
 
+  backup:
+    build:
+      context: .
+      dockerfile: deploy/backup.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:?Set BACKUP_PASSPHRASE in .env}
+      BACKUP_DB_HOST: db
+      BACKUP_DB_PORT: '5432'
+      BACKUP_DB_NAME: ${POSTGRES_DB:-jsbh}
+      BACKUP_DB_USER: ${JSBH_APP_USER:-jsbh_app}
+      BACKUP_DB_PASSWORD: ${JSBH_APP_PASSWORD:?Set JSBH_APP_PASSWORD in .env}
+      BACKUP_DIR: /backups
+      BACKUP_CRON: ${BACKUP_CRON:-0 2 * * *}
+      BACKUP_ON_START: ${BACKUP_ON_START:-true}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-14}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-8}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-}
+      ALLOW_LOCAL_ONLY_BACKUPS: ${ALLOW_LOCAL_ONLY_BACKUPS:-false}
+    volumes:
+      - backupdata:/backups
+    networks: [data]
+    # Mount an rclone config at /config/rclone/rclone.conf and set RCLONE_REMOTE
+    # for off-site copies; the service refuses to run local-only by default.
+
   web:
     build:
       context: .
@@ -111,6 +140,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+  backupdata:
 
 networks:
   web:
