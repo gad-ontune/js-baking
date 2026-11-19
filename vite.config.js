@@ -1,3 +1,4 @@
+import process from 'node:process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -28,15 +29,26 @@ const securityHeaders = (production) => ({
   ...(production ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' } : {}),
 })
 
+// The SPA calls the API on its own origin. Vite forwards /api to the local
+// FastAPI server so cookies and CSRF tokens stay same-origin in development.
+const apiProxy = {
+  '/api': {
+    target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8000',
+    changeOrigin: true,
+  },
+}
+
 export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
     port: 5173,
     headers: securityHeaders(false),
+    proxy: apiProxy,
   },
   preview: {
     port: 4173,
     headers: securityHeaders(true),
+    proxy: apiProxy,
   },
 })

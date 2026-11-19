@@ -8,21 +8,33 @@ The application is built around the supplied Software Requirements Specification
 
 ## Quick start
 
+Authentication is handled by the FastAPI backend; business demo data is stored in the browser. Run both servers:
+
 ```bash
+# Backend (security API)
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements-dev.txt
+backend/.venv/bin/python backend/scripts/seed_demo.py
+backend/.venv/bin/python -m uvicorn backend.app.main:app --port 8000
+
+# Frontend, in a second terminal
 npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**.
+Open **http://localhost:5173**. Vite forwards `/api` to `http://127.0.0.1:8000`; override the target with `VITE_API_TARGET` if needed. If the API is not running, the sign-in screen shows an "API unavailable" message.
 
-### Demo accounts
+### Demo accounts (local development only)
+
+These accounts are created by `backend/scripts/seed_demo.py`. The one-click buttons on the sign-in screen fill the credentials for you.
 
 | Role | Username | Password | Access |
 |---|---|---|---|
-| Owner / Administrator | `amina` | `owner123` | Full access to every module |
-| Staff | `brian` | `staff123` | Operational modules only; no settings or user management |
+| Owner | `amina` | `JSBH-Owner-2026` | Full access, including users and audit |
+| Manager | `wanjiku` | `JSBH-Manager-2026` | Daily operations and basic reports |
+| Staff | `brian` | `JSBH-Staff-2026` | Operational modules only |
 
-The sign-in screen has one-click demo account buttons.
+**These are public demo credentials. Never deploy them.** For a real deployment, create an owner with `backend/scripts/create_owner.py` using environment-only credentials and do not run the demo seeder.
 
 ### Production build
 
@@ -122,7 +134,7 @@ The first sync seeds existing demo alerts into the inbox without sending a burst
 ```text
 src/
   components/       Reusable UI, app shell, report shell
-  lib/              Seed data, analytics, formatting, notifications and persistence store
+  lib/              API client, permission map, demo credentials, seed data, analytics, formatting and persistence store
   pages/
     Notifications.jsx  Dedicated notification centre
     inventory/
@@ -135,7 +147,7 @@ src/
   main.jsx          App entry point
 ```
 
-Data is persisted in `localStorage` under `js-baking-house-v3`. All mutations flow through `src/lib/store.jsx`, which keeps the UI independent of the storage mechanism. That boundary is deliberately kept clean so the browser store can be replaced by FastAPI/PostgreSQL endpoints during the backend phase without rewriting the screens.
+Business demo data is persisted in `localStorage` under `js-baking-house-v3`; all of it flows through `src/lib/store.jsx`. Authentication, session state, the account directory and audit records now come from the FastAPI security backend through `src/lib/api.js`. Route guards use `src/lib/permissions.js`, which mirrors the backend role map, but the backend remains the only authority for whether an action is allowed. No password is stored in browser storage.
 
 ---
 
@@ -154,9 +166,9 @@ Data is persisted in `localStorage` under `js-baking-house-v3`. All mutations fl
 
 ---
 
-## Backend security API (Phase 2)
+## Backend security API and SPA integration
 
-A FastAPI security foundation now exists under `backend/`. It is **not yet connected to the React UI** — the SPA remains the browser-persisted client review build.
+The FastAPI backend under `backend/` is connected to the React sign-in, route guards, user management and audit pages. Business records (inventory, purchases, production, sales, expenses, reports) are still local demo data because no business endpoints exist yet.
 
 ```bash
 # Install backend dependencies (dev + tests + scanners)
@@ -164,23 +176,26 @@ python3 -m venv backend/.venv
 backend/.venv/bin/pip install -r backend/requirements-dev.txt
 
 # Run the API locally
-ENVIRONMENT=development backend/.venv/bin/python -m uvicorn backend.app.main:app --reload
+backend/.venv/bin/python -m uvicorn backend.app.main:app --port 8000
 
-# Create the first owner (credentials come only from the environment)
+# Local demo accounts (public dev-only credentials)
+backend/.venv/bin/python backend/scripts/seed_demo.py
+
+# Or create a real first owner from environment-only credentials
 cp backend/.env.example backend/.env      # then edit it, never commit it
 SEED_OWNER_USERNAME=... SEED_OWNER_PASSWORD=... \
   backend/.venv/bin/python backend/scripts/create_owner.py
 
-# Verify
-npm run verify:backend
+# Verify everything
+npm run verify && npm run verify:backend
 ```
 
-The API exposes `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/change-password`, `GET /api/v1/auth/me`, owner-only user management under `/api/v1/users`, a read-only `/api/v1/audit`, and `/health`. Authentication uses Argon2id hashes and server-managed HttpOnly cookies with double-submit CSRF tokens; there is no JWT and no credential in `localStorage` on the backend side.
+The API exposes `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/change-password`, `GET /api/v1/auth/me`, owner-only user management under `/api/v1/users`, a read-only `/api/v1/audit`, and `/health`. Authentication uses Argon2id hashes and server-managed HttpOnly cookies with double-submit CSRF tokens; there is no JWT and no credential in `localStorage` on the backend side. The SPA sends `credentials: 'include'` and copies only the CSRF cookie into a header.
 
-See `SECURITY_ASSESSMENT.md` for the full audit, implementation record, test results, remaining gaps and deployment configuration. **This is not a production-ready system**; MFA, PostgreSQL, backup/restore, business-record authorization and SPA integration are still outstanding.
+See `SECURITY_ASSESSMENT.md` for the full audit, implementation record, test results, remaining gaps and deployment configuration. **This is not a production-ready system**; MFA, PostgreSQL, backup/restore and business-record authorization are still outstanding.
 
 The visual identity is built with typography, colour and inline icons. Small PNG icons in `public/` are used only for PWA installation and device notifications.
 
 ---
 
-**Version:** 1.0 · **Default currency:** KES · **Status:** Client review build + backend security foundation
+**Version:** 1.0 · **Default currency:** KES · **Status:** Client review build + API-backed authentication/RBAC

@@ -278,7 +278,7 @@ No production compliance claim is made. This section records the initial assessm
 
 ## 7. Implementation progress — Phase 2 (backend foundation)
 
-**Status:** implemented and verified. The React SPA is **not yet connected** to this API; see section 8.
+**Status:** implemented and verified. The React SPA was initially not connected; Phase 3 (section 9) completed that integration.
 
 | Control | Implementation location and configuration | Automated test | Result |
 |---|---|---|---|
@@ -315,12 +315,12 @@ No production compliance claim is made. This section records the initial assessm
 
 ### 8.1 Features implemented and verified
 
-Authentication (Argon2id, generic errors, rate limiting, active-user checks), server-managed sessions with idle/absolute expiry and revocation, CSRF plus origin validation, backend RBAC with deny-by-default, strict request schemas, append-only audit records, CORS allowlist, security headers, body-size limits, safe error handling, owner bootstrap without committed secrets, and frontend hygiene from Phase 1.
+Authentication (Argon2id, generic errors, rate limiting, active-user checks), server-managed sessions with idle/absolute expiry and revocation, CSRF plus origin validation, backend RBAC with deny-by-default, strict request schemas, append-only audit records, CORS allowlist, security headers, body-size limits, safe error handling, owner bootstrap without committed secrets, frontend hygiene from Phase 1, and API-backed authentication, RBAC, user management, password change and audit viewing in the SPA (Phase 3).
 
 ### 8.2 Files created or modified
 
-- Backend: `backend/__init__.py`, `backend/app/{__init__,config,database,models,security,ratelimit,audit,auth,schemas,main}.py`, `backend/app/routers/{__init__,auth,users,audit}.py`, `backend/scripts/create_owner.py`, `backend/pytest.ini`, `backend/tests/{conftest,test_security}.py`, `backend/requirements.txt`, `backend/requirements-dev.txt`, `backend/.env.example`.
-- Frontend / repo: `SECURITY_ASSESSMENT.md`, `package.json`, `.gitignore`, plus the Phase 1 files listed in section 6.
+- Backend: `backend/__init__.py`, `backend/app/{__init__,config,database,models,security,ratelimit,audit,auth,schemas,main}.py`, `backend/app/routers/{__init__,auth,users,audit}.py`, `backend/scripts/{create_owner,seed_demo}.py`, `backend/pytest.ini`, `backend/tests/{conftest,test_security,test_demo_seed}.py`, `backend/requirements.txt`, `backend/requirements-dev.txt`, `backend/.env.example`.
+- Frontend / repo: `src/lib/{api,permissions,demoCredentials}.js`, `src/lib/store.jsx`, `src/pages/Login.jsx`, `src/App.jsx`, `src/pages/settings/{Users,Audit}.jsx`, `src/lib/seed.js`, `vite.config.js`, `tests/{api,demoAccounts}.test.js`, `README.md`, `SECURITY_ASSESSMENT.md`, `package.json`, `.gitignore`, plus the Phase 1 files listed in section 6.
 
 ### 8.3 Security libraries introduced
 
@@ -328,9 +328,12 @@ Authentication (Argon2id, generic errors, rate limiting, active-user checks), se
 
 ### 8.4 Tests created and executed
 
-- `tests/security.test.js` — 7 frontend security tests.
+- `tests/security.test.js` — 7 frontend security tests (CSV injection, validation, password policy, navigation allowlist).
+- `tests/api.test.js` — 9 frontend API-client tests covering credential inclusion, CSRF header handling, network-error safety, route construction, secret-free errors, record mapping and RBAC mirror checks.
+- `tests/demoAccounts.test.js` — 2 consistency tests ensuring the one-click demo credentials match the backend seeder and that no plaintext passwords remain in `src/lib/seed.js`.
 - `backend/tests/test_security.py` — 34 backend security tests covering authentication, password security, sessions, RBAC, privilege escalation, IDOR-style user ID manipulation, brute-force protection, SQL injection, CSRF, origin validation, mass assignment, audit integrity, headers, body limits, error leakage and production configuration.
-- Total: **41 automated security tests**, all passing.
+- `backend/tests/test_demo_seed.py` — 3 tests covering demo password policy, production refusal and idempotent seeding.
+- Total: **55 automated tests** (18 frontend + 37 backend), all passing.
 - Backend tests deliberately do not exercise MFA, password reset, business-record IDOR, inventory/financial tampering or backup restoration because those controls do not exist yet.
 
 ### 8.5 Vulnerabilities resolved
@@ -341,7 +344,7 @@ Plaintext backend credential storage; client-only authentication; client-only au
 
 | Gap | Status | Impact |
 |---|---|---|
-| React SPA still uses `localStorage` with plain-text **demo** passwords and is not connected to the new API | **Not implemented** | The largest remaining gap. Backend controls do not protect the current demo UI. Integration is mandatory before real data. |
+| SPA authentication, RBAC, users and audit are API-backed; business records are still local demo data | **Partially implemented (Phase 3)** | Backend now enforces sign-in, roles, sessions, user changes and audit reads for the UI. Inventory/financial records have no API endpoints yet, so they remain browser-local and must not be used for real data. |
 | MFA/TOTP, recovery codes, MFA recovery | **Not implemented** | Owner/admin accounts lack a second factor. |
 | Password reset workflow | **Not implemented** | No token-based recovery, rate-limited reset or session invalidation on reset. |
 | PostgreSQL, migrations, least-privilege DB role, connection encryption | **Not implemented** | Default is local SQLite for development only. |
@@ -378,3 +381,31 @@ Plaintext backend credential storage; client-only authentication; client-only au
 - Behaviour of the in-memory rate limiter with multiple application workers.
 - Full OWASP ASVS 5.0.0 Level 2 review and authorised penetration testing.
 - MFA, password reset, backup and business-integrity controls once implemented.
+
+---
+
+## 9. Implementation progress — Phase 3 (SPA ↔ API integration)
+
+**Status:** implemented and verified locally. This closes the highest-priority gap from Phase 2.
+
+| Control | Implementation | Verification |
+|---|---|---|
+| Session restore and auth state | `src/lib/store.jsx` calls `GET /auth/me` on startup, exposes `authStatus`, and shows a loading gate in `src/App.jsx` and `src/pages/Login.jsx`. A five-minute heartbeat refreshes the backend idle window and detects remote logout or role change. | Live login → `/me` → logout flow; route guard behaviour |
+| API-backed sign-in and sign-out | `signIn`/`signOut` call `/auth/login` and `/auth/logout`. No password is compared or stored in the browser. | `tests/api.test.js`, live proxy smoke test |
+| CSRF-safe client | `src/lib/api.js` uses `credentials: 'include'` and copies only the `jsbh_csrf` cookie into `X-CSRF-Token` on state-changing requests; it never reads the session cookie. | `tests/api.test.js` (4 CSRF/credential tests) |
+| Backend-derived roles in route guards | `src/lib/permissions.js` mirrors `backend/app/auth.py`. Settings → Users and Audit now require `users.manage` and `audit.view`, which only the backend grants to owners. | `tests/api.test.js` permission tests |
+| Authoritative user directory | Users page reads and mutates accounts only through `/users`. The backend-created users are merged into local demo records for historical name lookup. | `src/pages/settings/Users.jsx`; API smoke test listed 3 seeded roles |
+| Own password change | `/auth/change-password` exposed through the Users page; the response rotates the session and CSRF token. | Backend `test_password_change_rotates_session_and_audits` |
+| Server-side audit view | Audit page reads `/audit` only; no client-side mutation is possible. | `src/pages/settings/Audit.jsx`; live audit fetch returned `LOGIN_SUCCESS` |
+| No plaintext demo passwords in SPA | Removed the three passwords from `src/lib/seed.js`; `backend/scripts/seed_demo.py` creates long dev-only accounts. The seeder refuses to run in production unless explicitly overridden. | `tests/demoAccounts.test.js`, `backend/tests/test_demo_seed.py` |
+| Local development proxy | `vite.config.js` forwards `/api` to the backend (default `http://127.0.0.1:8000`, configurable with `VITE_API_TARGET`) so cookies stay same-origin. | Live Vite + uvicorn smoke test through port 5175 → 8011 |
+
+**Verification executed**
+
+- `npm test` — **18 passed** (7 original + 9 API-client + 2 demo-account consistency).
+- `npm run test:backend` — **37 passed** (34 security + 3 demo-seed).
+- `npm run lint` and `npm run build` — pass.
+- Live end-to-end smoke test through the Vite proxy: owner login returned the backend user and CSRF token; `/auth/me`, `/users` and `/audit` succeeded with the session cookie; logout without a CSRF header returned **403**, with the header **204**, and `/auth/me` then returned **401**.
+- Standalone script checks: owner bootstrap, demo seeding, and production refusal (exit 2) all behaved as documented.
+
+**Scope boundary:** business data (inventory, purchases, production, sales, expenses, reports) is still stored in `localStorage`. The backend does not yet expose endpoints for those records, so the SPA cannot claim server-side enforcement for them. This is tracked as an explicit gap in section 8.6.

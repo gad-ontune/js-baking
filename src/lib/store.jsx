@@ -1,28 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createSeedData } from './seed'
 import { uid } from './format'
 import { SESSION_IDLE_MS } from './security'
+import { hasPermission } from './permissions'
+import { api } from './api'
 
 const STORAGE_KEY = 'js-baking-house-v3'
 const StoreContext = createContext(null)
-
-const ROLE_PERMISSIONS = {
-  owner: ['*'],
-  staff: [
-    'dashboard.view',
-    'inventory.view',
-    'inventory.manage',
-    'purchases.view',
-    'suppliers.view',
-    'production.view',
-    'production.manage',
-    'sales.view',
-    'sales.manage',
-    'expenses.view',
-    'expenses.manage',
-    'reports.basic',
-  ],
-}
+const HEARTBEAT_MS = 5 * 60 * 1000
 
 function loadInitialData() {
   try {
@@ -30,14 +15,17 @@ function loadInitialData() {
     if (stored) {
       const parsed = JSON.parse(stored)
       if (parsed?.inventory && parsed?.sales && parsed?.business) {
-        // Expire stale demo sessions on load. Production sessions must be
-        // enforced by the backend, not by browser state.
+        // Clean up legacy browser-session fields. Authentication is now managed
+        // by the backend; these values are kept only for local demo history.
         const lastActive = Number(parsed.sessionLastActive || 0)
         if (parsed.sessionUserId && (!lastActive || Date.now() - lastActive > SESSION_IDLE_MS)) {
           parsed.sessionUserId = null
           parsed.sessionLastActive = null
         }
         if (!Array.isArray(parsed.auditLogs)) parsed.auditLogs = []
+        if (!Array.isArray(parsed.users)) parsed.users = []
+        // Credentials must never live in browser storage.
+        parsed.users = parsed.users.map(({ password, ...user }) => user)
         return parsed
       }
     }
@@ -50,6 +38,10 @@ function loadInitialData() {
 export function StoreProvider({ children }) {
   const [data, setData] = useState(loadInitialData)
   const [toasts, setToasts] = useState([])
+  const [currentUser, setCurrentUser] = useState(null)
+  const [authStatus, setAuthStatus] = useState('loading')
+  const [apiAvailable, setApiAvailable] = useState(true)
+  const restoredRef = useRef(false)
 
   useEffect(() => {
     try {
@@ -58,6 +50,65 @@ export function StoreProvider({ children }) {
       // Storage can be disabled; the app still works for the current session.
     }
   }, [data])
+
+  /** Merge the authoritative backend directory with local users referenced by demo history. */
+  const setDirectory = useCallback((users) => {
+    const incoming = Array.isArray(users) ? users : []
+    setData((previous) => {
+      const byId = new Map(previous.users.map((user) => [user.id, user]))
+      const usernames = new Set(incoming.map((user) => String(user.username || '').toLowerCase()))
+      const merged = incoming.map((user) => ({ ...(byId.get(user.id) || {}), ...user }))
+      const localOnly = previous.users.filter(
+        (user) => !usernames.has(String(user.username || '').toLowerCase()),
+      )
+      return { ...previous, users: [...merged, ...localOnly] }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    let active = true
+
+    api.me()
+      .then((user) => {
+        if (!active) return
+        setCurrentUser(user)
+        setAuthStatus('authenticated')
+        setApiAvailable(true)
+        api.listUsers().then((users) => { if (active) setDirectory(users) }).catch(() => {
+          // Non-owners cannot list users; their own record is still authoritative.
+          if (active) setDirectory([user])
+        })
+      })
+      .catch((error) => {
+        if (!active) return
+        setCurrentUser(null)
+        setAuthStatus('anonymous')
+        setApiAvailable(!error.network)
+      })
+
+    return () => { active = false }
+  }, [setDirectory])
+
+  // Keep the backend idle window alive while a tab is open, and notice remote
+  // logout, deactivation or role changes without relying on browser state.
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return undefined
+    const timer = window.setInterval(() => {
+      api.me()
+        .then((user) => {
+          setCurrentUser(user)
+          setDirectory([user])
+        })
+        .catch((error) => {
+          setCurrentUser(null)
+          setAuthStatus('anonymous')
+          if (error.network) setApiAvailable(false)
+        })
+    }, HEARTBEAT_MS)
+    return () => window.clearInterval(timer)
+  }, [authStatus, setDirectory])
 
   const notify = useCallback((message, type = 'success') => {
     const id = uid('toast')
@@ -71,7 +122,7 @@ export function StoreProvider({ children }) {
     setToasts((current) => current.filter((toast) => toast.id !== id))
   }, [])
 
-  /** Apply a change to an isolated draft, keeping persistence and history consistent. */
+  /** Apply a change to an isolated draft, keeping local demo history consistent. */
   const mutate = useCallback((recipe) => {
     setData((previous) => {
       const draft = structuredClone(previous)
@@ -88,103 +139,72 @@ export function StoreProvider({ children }) {
         action,
         entity,
         details,
-        userId: draft.sessionUserId,
+        userId: currentUser?.id || null,
         date: new Date().toISOString(),
       })
-    },
-    [],
-  )
-
-  const currentUser = useMemo(
-    () => data.users.find((user) => user.id === data.sessionUserId && user.active) || null,
-    [data.users, data.sessionUserId],
-  )
-
-  const can = useCallback(
-    (permission) => {
-      if (!currentUser) return false
-      const permissions = ROLE_PERMISSIONS[currentUser.role] || []
-      return permissions.includes('*') || permissions.includes(permission)
     },
     [currentUser],
   )
 
-  const signIn = useCallback(
-    (username, password) => {
-      const normalized = String(username || '').trim().toLowerCase()
-      const user = data.users.find(
-        (candidate) =>
-          String(candidate.username || '').toLowerCase() === normalized &&
-          candidate.password === password &&
-          candidate.active,
-      )
-
-      if (!user) {
-        // Never reveal which part of the credentials was wrong.
-        mutate((draft) => {
-          draft.auditLogs.unshift({
-            id: uid('audit'),
-            action: 'LOGIN_FAILED',
-            entity: 'Authentication',
-            details: 'Failed sign-in attempt',
-            userId: null,
-            date: new Date().toISOString(),
-          })
-        })
-        return { ok: false, message: 'Incorrect username or password.' }
-      }
-
-      mutate((draft) => {
-        draft.sessionUserId = user.id
-        draft.sessionLastActive = Date.now()
-        draft.auditLogs.unshift({
-          id: uid('audit'),
-          action: 'USER_LOGIN',
-          entity: 'User',
-          details: `${user.name} signed in`,
-          userId: user.id,
-          date: new Date().toISOString(),
-        })
-      })
-      return { ok: true, user }
-    },
-    [data.users, mutate],
+  const can = useCallback(
+    (permission) => Boolean(currentUser && hasPermission(currentUser.role, permission)),
+    [currentUser],
   )
 
-  const signOut = useCallback(() => {
-    mutate((draft) => {
-      draft.auditLogs.unshift({
-        id: uid('audit'),
-        action: 'USER_LOGOUT',
-        entity: 'User',
-        details: `${currentUser?.name || 'User'} signed out`,
-        userId: draft.sessionUserId,
-        date: new Date().toISOString(),
-      })
-      draft.sessionUserId = null
-      draft.sessionLastActive = null
-    })
-  }, [currentUser, mutate])
+  const signIn = useCallback(
+    async (username, password) => {
+      try {
+        const result = await api.login(username, password)
+        setCurrentUser(result.user)
+        setAuthStatus('authenticated')
+        setApiAvailable(true)
+        api.listUsers().then(setDirectory).catch(() => setDirectory([result.user]))
+        return { ok: true, user: result.user }
+      } catch (error) {
+        return {
+          ok: false,
+          message: error.status === 401 ? 'Incorrect username or password.' : error.message,
+          network: Boolean(error.network),
+        }
+      }
+    },
+    [setDirectory],
+  )
 
-  const touchSession = useCallback(() => {
-    setData((previous) =>
-      previous.sessionUserId ? { ...previous, sessionLastActive: Date.now() } : previous,
-    )
+  const signOut = useCallback(async () => {
+    try {
+      await api.logout()
+    } catch {
+      // Clear local state even if the network fails; the server session will
+      // still expire on its own.
+    }
+    setCurrentUser(null)
+    setAuthStatus('anonymous')
   }, [])
+
+  const changePassword = useCallback(async (currentPassword, newPassword) => {
+    try {
+      const result = await api.changePassword(currentPassword, newPassword)
+      setCurrentUser(result.user)
+      setDirectory([result.user])
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, message: error.message }
+    }
+  }, [setDirectory])
+
+  // The backend enforces idle and absolute expiry. This hook is retained for
+  // callers that previously touched the browser session; it is intentionally a
+  // no-op rather than a second, weaker session authority.
+  const touchSession = useCallback(() => {}, [])
 
   const resetDemo = useCallback(() => {
     const fresh = createSeedData()
-    fresh.auditLogs.unshift({
-      id: uid('audit'),
-      action: 'DEMO_RESET',
-      entity: 'Application',
-      details: 'Demo data restored to seeded state',
-      userId: currentUser?.id || null,
-      date: new Date().toISOString(),
-    })
+    // Keep the authoritative account directory; only business demo data resets.
+    fresh.users = data.users.map((user) => ({ ...user }))
     setData(fresh)
-    notify('Demo data restored to its original state.')
-  }, [currentUser, notify])
+    notify('Demo business data restored to its original state.')
+  }, [data.users, notify])
 
   const value = useMemo(
     () => ({
@@ -195,13 +215,17 @@ export function StoreProvider({ children }) {
       toasts,
       dismissToast,
       currentUser,
+      authStatus,
+      apiAvailable,
       can,
       signIn,
       signOut,
+      changePassword,
       touchSession,
       resetDemo,
+      setDirectory,
     }),
-    [data, mutate, addAudit, notify, toasts, dismissToast, currentUser, can, signIn, signOut, touchSession, resetDemo],
+    [data, mutate, addAudit, notify, toasts, dismissToast, currentUser, authStatus, apiAvailable, can, signIn, signOut, changePassword, touchSession, resetDemo, setDirectory],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

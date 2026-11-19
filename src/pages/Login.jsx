@@ -1,12 +1,26 @@
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowRight, ChartNoAxesCombined, LockKeyhole, Package, ShieldCheck, Sparkles } from 'lucide-react'
 import { useStore } from '../lib/store'
+import { safeInternalPath } from '../lib/security'
+import { DEMO_ACCOUNTS } from '../lib/demoCredentials'
 import { Button, Field } from '../components/ui'
 
+function AuthLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-canvas">
+      <div className="text-center">
+        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-bakery-100 border-t-bakery-600" />
+        <p className="mt-4 text-sm text-muted">Checking your session…</p>
+      </div>
+    </div>
+  )
+}
+
 export default function Login() {
-  const { currentUser, signIn, notify, data } = useStore()
+  const { currentUser, authStatus, apiAvailable, signIn, notify, data } = useStore()
   const navigate = useNavigate()
+  const location = useLocation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -14,36 +28,39 @@ export default function Login() {
   const [failedAttempts, setFailedAttempts] = useState(0)
   const [lockedUntil, setLockedUntil] = useState(0)
 
+  if (authStatus === 'loading') return <AuthLoading />
   if (currentUser) return <Navigate to="/dashboard" replace />
 
   const locked = Date.now() < lockedUntil
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
-    if (locked) return
+    if (locked || loading) return
     setError('')
     setLoading(true)
-    const delay = Math.min(350 * 2 ** failedAttempts, 5000)
-    window.setTimeout(() => {
-      const result = signIn(username, password)
-      setLoading(false)
-      if (!result.ok) {
-        const attempts = failedAttempts + 1
-        setFailedAttempts(attempts)
-        if (attempts >= 5) {
-          setLockedUntil(Date.now() + 30_000)
-          setError('Too many failed attempts. Try again shortly.')
-        } else {
-          setError(result.message)
-        }
-        notify(result.message, 'error')
-        return
+
+    const result = await signIn(username, password)
+    setLoading(false)
+
+    if (!result.ok) {
+      const attempts = failedAttempts + 1
+      setFailedAttempts(attempts)
+      if (attempts >= 5) {
+        setLockedUntil(Date.now() + 30_000)
+        setError('Too many failed attempts. Try again shortly.')
+      } else {
+        setError(result.message)
       }
-      setFailedAttempts(0)
-      setLockedUntil(0)
-      notify(`Welcome back, ${result.user.name.split(' ')[0]}!`)
-      navigate('/dashboard')
-    }, delay)
+      notify(result.message, 'error')
+      return
+    }
+
+    setFailedAttempts(0)
+    setLockedUntil(0)
+    notify(`Welcome back, ${result.user.name.split(' ')[0]}!`)
+    const requested = location.state?.from
+    const target = safeInternalPath(requested, window.location.origin) || '/dashboard'
+    navigate(target, { replace: true })
   }
 
   const fillDemo = (user, pass) => {
@@ -109,6 +126,12 @@ export default function Login() {
           <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight text-ink">Sign in to your workspace</h2>
           <p className="mt-2 text-sm text-muted">Use your account to continue managing the bakery.</p>
 
+          {!apiAvailable && (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              The security API is unavailable. Start the backend server and reload this page.
+            </p>
+          )}
+
           <form onSubmit={handleSubmit} className="mt-8 space-y-5">
             <Field label="Username">
               <input
@@ -137,29 +160,30 @@ export default function Login() {
 
             {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-            <Button type="submit" variant="primary" className="w-full py-3" disabled={loading || locked}>
+            <Button type="submit" variant="primary" className="w-full py-3" disabled={loading || locked || !apiAvailable}>
               {locked ? 'Temporarily locked' : loading ? 'Signing in…' : 'Sign in'}
               {!loading && !locked && <ArrowRight size={16} />}
             </Button>
           </form>
 
           <div className="mt-8 rounded-2xl border border-line bg-white p-4">
-            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-muted">Demo accounts</p>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wider text-muted">Demo accounts (dev only)</p>
+            <p className="mb-3 text-xs text-muted">Seed these with <code className="font-mono">backend/scripts/seed_demo.py</code> before signing in.</p>
             <div className="grid gap-2">
-              <button type="button" onClick={() => fillDemo('amina', 'owner123')} className="flex items-center justify-between rounded-xl border border-bakery-100 bg-bakery-50 px-3 py-2.5 text-left transition hover:border-bakery-300">
-                <span>
-                  <span className="block text-sm font-semibold text-ink">Owner account</span>
-                  <span className="block text-xs text-muted">amina / owner123 · Full access</span>
-                </span>
-                <span className="badge bg-white text-bakery-700">Owner</span>
-              </button>
-              <button type="button" onClick={() => fillDemo('brian', 'staff123')} className="flex items-center justify-between rounded-xl border border-line px-3 py-2.5 text-left transition hover:border-bakery-300">
-                <span>
-                  <span className="block text-sm font-semibold text-ink">Staff account</span>
-                  <span className="block text-xs text-muted">brian / staff123 · Limited access</span>
-                </span>
-                <span className="badge bg-slate-100 text-slate-700">Staff</span>
-              </button>
+              {DEMO_ACCOUNTS.map((account) => (
+                <button
+                  key={account.username}
+                  type="button"
+                  onClick={() => fillDemo(account.username, account.password)}
+                  className="flex items-center justify-between rounded-xl border border-bakery-100 bg-bakery-50 px-3 py-2.5 text-left transition hover:border-bakery-300"
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-ink">{account.role} account</span>
+                    <span className="block text-xs text-muted">{account.username} · {account.access}</span>
+                  </span>
+                  <span className="badge bg-white text-bakery-700">{account.role}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>

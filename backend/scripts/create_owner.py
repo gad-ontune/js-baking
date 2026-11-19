@@ -11,12 +11,12 @@ No credentials are stored in this file or in the repository.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.config import settings  # noqa: E402
-from app.database import SessionLocal, init_db  # noqa: E402
-from app.models import User  # noqa: E402
-from app.security import hash_password, new_id, password_policy_error  # noqa: E402
+from backend.app.config import settings  # noqa: E402
+from backend.app.database import SessionLocal, init_db  # noqa: E402
+from backend.app.models import User  # noqa: E402
+from backend.app.security import hash_password, new_id, password_policy_error  # noqa: E402
 
 
 def main() -> int:

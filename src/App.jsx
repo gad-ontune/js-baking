@@ -40,6 +40,17 @@ function RequirePermission({ permission, children }) {
   return children
 }
 
+function AuthLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-canvas">
+      <div className="text-center">
+        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-bakery-100 border-t-bakery-600" />
+        <p className="mt-4 text-sm text-muted">Checking your session…</p>
+      </div>
+    </div>
+  )
+}
+
 function AccessDenied() {
   return (
     <Card className="mx-auto max-w-xl p-6">
@@ -64,6 +75,9 @@ function NotFound() {
 const guard = (permission, element) => <RequirePermission permission={permission}>{element}</RequirePermission>
 
 export default function App() {
+  const { authStatus } = useStore()
+  if (authStatus === 'loading') return <AuthLoading />
+
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -95,9 +109,9 @@ export default function App() {
         <Route path="reports/production" element={guard('reports.basic', <ProductionReport />)} />
 
         <Route path="settings/business" element={guard('settings.view', <BusinessProfile />)} />
-        <Route path="settings/users" element={guard('settings.view', <Users />)} />
+        <Route path="settings/users" element={guard('users.manage', <Users />)} />
         <Route path="settings/configuration" element={guard('settings.view', <Configuration />)} />
-        <Route path="settings/audit" element={guard('settings.view', <AuditHistory />)} />
+        <Route path="settings/audit" element={guard('audit.view', <AuditHistory />)} />
 
         <Route path="*" element={<NotFound />} />
       </Route>
