@@ -296,7 +296,7 @@ class ExpenseUpdate(StrictModel):
     category: str | None = Field(default=None, min_length=1, max_length=80)
     description: str | None = Field(default=None, min_length=1, max_length=300)
     amount: float | None = Field(default=None, gt=0, le=100_000_000)
-    date: str | None = Field(default=None, max_length=10)
+    date: str | None = Field(default=None, max_length=40)
     paymentMethod: str | None = Field(default=None, min_length=1, max_length=40)
     notes: str | None = Field(default=None, max_length=1000)
 
@@ -321,9 +321,17 @@ class ProductionCreate(StrictModel):
 
 
 class ProductionUpdate(StrictModel):
+    productName: str | None = Field(default=None, min_length=1, max_length=120)
+    category: str | None = Field(default=None, min_length=1, max_length=80)
     quantity: float | None = Field(default=None, gt=0, le=1_000_000)
+    date: str | None = Field(default=None, max_length=40)
     description: str | None = Field(default=None, max_length=500)
     notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator('date')
+    @classmethod
+    def check_date(cls, value: str | None) -> str | None:
+        return validate_date(value) if value else value
 
 
 class ReverseRequest(StrictModel):
