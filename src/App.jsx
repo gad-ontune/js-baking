@@ -1,7 +1,7 @@
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { ShieldAlert } from 'lucide-react'
 import Layout from './components/Layout'
-import Login from './pages/Login'
+import Login, { VerifyEmailPage } from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Inventory from './pages/inventory/Inventory'
 import InventoryCategories from './pages/inventory/Categories'
@@ -81,6 +81,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<Login />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route
         element={<RequireAuth><Layout /></RequireAuth>}
       >

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, ShieldOff, UserCog, Users as UsersIcon } from 'lucide-react'
+import { KeyRound, MailCheck, Pencil, Plus, RefreshCw, ShieldCheck, ShieldOff, UserCog, Users as UsersIcon } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { api } from '../../lib/api'
 import { formatDate } from '../../lib/format'
@@ -29,6 +29,8 @@ export default function Users() {
   const [editing, setEditing] = useState(null)
   const [creating, setCreating] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
+  const [resetTarget, setResetTarget] = useState(null)
+  const [resetResult, setResetResult] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -101,6 +103,34 @@ export default function Users() {
     }
   }
 
+  const issueResetCode = async (user) => {
+    setBusy(true)
+    setResetResult(null)
+    try {
+      const result = await api.issueResetToken(user.id)
+      setResetTarget(user)
+      setResetResult(result)
+      notify(result.message)
+    } catch (tokenError) {
+      notify(tokenError.message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const sendVerification = async () => {
+    setBusy(true)
+    try {
+      const result = await api.requestEmailVerification()
+      notify(result.message)
+      if (result.devToken) notify(`Development verification code: ${result.devToken}`)
+    } catch (verificationError) {
+      notify(verificationError.message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const savePassword = async ({ currentPassword, newPassword }) => {
     setBusy(true)
     try {
@@ -123,6 +153,7 @@ export default function Users() {
         subtitle="Accounts are managed by the security API. Roles and status are enforced on the server."
         actions={
           <div className="flex flex-wrap gap-2">
+            {!currentUser?.emailVerified && <Button icon={MailCheck} onClick={sendVerification} disabled={busy}>Verify my email</Button>}
             <Button icon={KeyRound} onClick={() => setChangingPassword(true)}>Change my password</Button>
             <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>Add user</Button>
           </div>
@@ -164,7 +195,14 @@ export default function Users() {
                         <Avatar name={user.name} size="sm" />
                         <div>
                           <p className="font-semibold">{user.name}{user.id === currentUser?.id && <span className="ml-2 text-xs text-bakery-600">(you)</span>}</p>
-                          <p className="text-xs text-muted">{user.email || '—'}</p>
+                          <p className="text-xs text-muted">
+                            {user.email || '—'}
+                            {user.email && (
+                              <Badge tone={user.emailVerified ? 'leaf' : 'amber'} className="ml-2">
+                                {user.emailVerified ? 'Verified' : 'Unverified'}
+                              </Badge>
+                            )}
+                          </p>
                         </div>
                       </div>
                     </td>
@@ -175,7 +213,8 @@ export default function Users() {
                     <td>
                       <div className="flex justify-end gap-1">
                         <IconButton icon={Pencil} label="Edit role" onClick={() => setEditing(user)} disabled={user.id === currentUser?.id || busy} />
-                        <IconButton icon={KeyRound} label={user.active ? 'Deactivate user' : 'Activate user'} onClick={() => toggleActive(user)} disabled={user.id === currentUser?.id || busy} />
+                        <IconButton icon={KeyRound} label="Issue one-time reset code" onClick={() => issueResetCode(user)} disabled={!user.active || busy} />
+                        <IconButton icon={ShieldCheck} label={user.active ? 'Deactivate user' : 'Activate user'} onClick={() => toggleActive(user)} disabled={user.id === currentUser?.id || busy} />
                         <IconButton icon={ShieldOff} label="Revoke all sessions" onClick={() => revokeSessions(user)} disabled={busy} />
                       </div>
                     </td>
@@ -224,6 +263,27 @@ export default function Users() {
 
       {changingPassword && (
         <PasswordForm busy={busy} onClose={() => setChangingPassword(false)} onSave={savePassword} />
+      )}
+
+      {resetTarget && (
+        <Modal
+          open
+          onClose={() => { setResetTarget(null); setResetResult(null) }}
+          title={`Reset code for ${resetTarget.name}`}
+          description="Passwords are stored as one-way hashes and cannot be displayed. Share this single-use code with the user through a private channel."
+          size="md"
+          footer={<Button variant="primary" onClick={() => { setResetTarget(null); setResetResult(null) }}>Done</Button>}
+        >
+          {resetResult ? (
+            <div className="grid gap-3">
+              <label className="block rounded-xl border border-leaf-200 bg-leaf-50 p-4">
+                <span className="text-xs font-bold uppercase tracking-wider text-leaf-800">One-time code — shown only now</span>
+                <code className="mt-2 block break-all rounded-lg bg-white p-3 font-mono text-sm text-ink">{resetResult.token}</code>
+              </label>
+              <p className="text-xs text-muted">Expires {formatDate(resetResult.expiresAt)}. {resetResult.emailSent ? 'The code was also emailed to the user.' : 'Email delivery is not configured; relay the code yourself.'}</p>
+            </div>
+          ) : <p className="text-sm text-muted">Generating a secure code…</p>}
+        </Modal>
       )}
     </div>
   )

@@ -48,6 +48,7 @@ export function mapUser(user = {}) {
     role: user.role,
     active: Boolean(user.active),
     mfaEnabled: Boolean(user.mfa_enabled),
+    emailVerified: Boolean(user.email_verified_at),
     createdAt: user.created_at,
   }
 }
@@ -141,6 +142,29 @@ export function createApiClient({
       return { user: mapUser(payload.user), csrfToken: payload.csrf_token, sessionExpiresAt: payload.session_expires_at }
     },
     logout: () => request('/auth/logout', { method: 'POST' }),
+    forgotPassword: async (username, email) => {
+      const payload = await request('/auth/forgot-password', {
+        method: 'POST',
+        body: { username, email },
+      })
+      return {
+        message: payload.message,
+        emailSent: payload.email_sent,
+        devToken: payload.dev_token || '',
+      }
+    },
+    resetPassword: (token, newPassword) => request('/auth/reset-password', {
+      method: 'POST',
+      body: { token, new_password: newPassword },
+    }),
+    requestEmailVerification: async () => {
+      const payload = await request('/auth/email/verification-code', { method: 'POST', body: {} })
+      return { message: payload.message, emailSent: payload.email_sent, devToken: payload.dev_token || '' }
+    },
+    verifyEmail: (token) => request('/auth/email/verify', {
+      method: 'POST',
+      body: { token },
+    }),
     changePassword: async (currentPassword, newPassword) => {
       const payload = await request('/auth/change-password', {
         method: 'POST',
@@ -156,6 +180,13 @@ export function createApiClient({
       mapUser(await request(`/users/${encodeURIComponent(userId)}/status`, { method: 'PATCH', body: { active } })),
     revokeSessions: (userId) =>
       request(`/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: 'POST' }),
+    issueResetToken: async (userId) => {
+      const payload = await request(`/users/${encodeURIComponent(userId)}/reset-token`, {
+        method: 'POST',
+        body: {},
+      })
+      return { token: payload.token, expiresAt: payload.expires_at, emailSent: payload.email_sent, message: payload.message }
+    },
     listAudit: async ({ limit = 100, offset = 0 } = {}) =>
       (await request(`/audit?limit=${limit}&offset=${offset}`)).map(mapAudit),
 

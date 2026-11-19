@@ -84,6 +84,42 @@ test('client methods use the expected routes and encode user ids', async () => {
   ])
 })
 
+test('recovery and verification helpers call the documented routes', async () => {
+  const responses = [
+    jsonResponse({ message: 'sent', email_sent: false, dev_token: 'dev-code' }),
+    jsonResponse({ message: 'done' }),
+    jsonResponse({ message: 'verification sent', email_sent: true, dev_token: null }),
+    jsonResponse({ token: 'one-time', expires_at: '2026-12-01T00:00:00Z', email_sent: true, message: 'share once' }),
+  ]
+  let index = 0
+  const calls = []
+  const client = createApiClient({
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options })
+      return responses[index++]
+    },
+    getCookie: () => 'jsbh_csrf=csrf-token-42',
+  })
+
+  const forgot = await client.forgotPassword('amina', 'amina@example.test')
+  await client.resetPassword('dev-code', 'NewPassword2040!')
+  await client.requestEmailVerification()
+  const issued = await client.issueResetToken('usr_staff')
+
+  assert.equal(forgot.devToken, 'dev-code')
+  assert.equal(issued.token, 'one-time')
+  assert.deepEqual(calls.map((call) => `${call.options.method} ${call.url}`), [
+    'POST /api/v1/auth/forgot-password',
+    'POST /api/v1/auth/reset-password',
+    'POST /api/v1/auth/email/verification-code',
+    'POST /api/v1/users/usr_staff/reset-token',
+  ])
+  assert.deepEqual(JSON.parse(calls[0].options.body), { username: 'amina', email: 'amina@example.test' })
+  assert.deepEqual(JSON.parse(calls[1].options.body), { token: 'dev-code', new_password: 'NewPassword2040!' })
+  assert.equal(calls.every((call) => call.options.headers['X-CSRF-Token'] === 'csrf-token-42'), true)
+  assert.equal(calls.every((call) => call.options.credentials === 'include'), true)
+})
+
 test('business helpers use server-authoritative routes and send CSRF on writes', async () => {
   const { calls, fetchImpl } = mockFetch(jsonResponse({ ok: true }))
   const client = createApiClient({ fetchImpl, getCookie: () => 'jsbh_csrf=csrf-token-42' })
@@ -150,7 +186,7 @@ test('mappers convert backend records into frontend shapes', () => {
     active: true, mfa_enabled: false, created_at: '2026-01-01T00:00:00Z',
     password_hash: '$argon2id$secret',
   })
-  assert.deepEqual(Object.keys(user).sort(), ['active', 'createdAt', 'email', 'id', 'mfaEnabled', 'name', 'role', 'username'])
+  assert.deepEqual(Object.keys(user).sort(), ['active', 'createdAt', 'email', 'emailVerified', 'id', 'mfaEnabled', 'name', 'role', 'username'])
   assert.equal(user.email, '')
   assert.equal(user.password_hash, undefined)
 

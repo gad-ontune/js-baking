@@ -4,10 +4,13 @@ from sqlalchemy.orm import Session
 from ..audit import record_audit
 from ..auth import get_current_user, require_csrf, require_permissions
 from ..database import get_db
+from ..email_service import send_password_reset
 from ..models import Session as SessionModel
 from ..models import User
-from ..schemas import RoleUpdate, StatusUpdate, UserCreate, UserResponse
+from ..ratelimit import rate_limiter
+from ..schemas import ResetTokenResponse, RoleUpdate, StatusUpdate, UserCreate, UserResponse
 from ..security import hash_password, new_id, utc_now
+from ..tokens import issue_token
 
 router = APIRouter(prefix='/users', tags=['users'])
 
@@ -167,4 +170,50 @@ def revoke_user_sessions(
         entity='User',
         entity_id=target.id,
         user_id=actor.id,
+    )
+
+
+@router.post('/{user_id}/reset-token', response_model=ResetTokenResponse, dependencies=[Depends(require_csrf)])
+def issue_password_reset_token(
+    user_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(manage_users),
+) -> ResetTokenResponse:
+    """Owner issues a one-time recovery code for a staff or manager account.
+
+    Stored passwords are one-way Argon2id hashes and can never be displayed.
+    The code is returned to the owner exactly once, delivered by email when
+    SMTP is configured, and all existing sessions are revoked immediately.
+    """
+    rate_limiter.check(f'reset-token:owner:{actor.id}', 10, 900)
+    target = db.query(User).filter(User.id == user_id, User.active.is_(True)).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='User not found.')
+
+    token, record = issue_token(db, target, 'password_reset', issued_by=actor.id)
+    delivered = False
+    if target.email:
+        delivered = send_password_reset(target.email, token, owner_initiated=True)
+    _revoke_sessions(db, target.id)
+    rate_limiter.record(f'reset-token:owner:{actor.id}')
+
+    record_audit(
+        db,
+        request,
+        event_type='USER',
+        action='RESET_TOKEN_ISSUED',
+        entity='User',
+        entity_id=target.id,
+        user_id=actor.id,
+        details=f'One-time password reset code issued for {target.username}; token value omitted',
+    )
+    return ResetTokenResponse(
+        token=token,
+        expires_at=record.expires_at,
+        email_sent=delivered,
+        message=(
+            'Give this one-time code to the user. It expires soon and works once. '
+            'It will not be shown again.'
+        ),
     )

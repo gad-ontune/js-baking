@@ -75,15 +75,20 @@ def require_permissions(*permissions: str):
     return dependency
 
 
+def require_safe_origin(request: Request) -> None:
+    """Reject explicit cross-site origins on unauthenticated state changes."""
+    origin = request.headers.get('origin')
+    if origin and origin not in settings.cors_origin_list:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Untrusted request origin.')
+
+
 def require_csrf(request: Request) -> None:
     if request.method in {'GET', 'HEAD', 'OPTIONS'}:
         return
 
     # Defence in depth: browsers send Origin on cross-site POSTs. A request
     # with an explicit but untrusted Origin is rejected even if a token leaks.
-    origin = request.headers.get('origin')
-    if origin and origin not in settings.cors_origin_list:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Untrusted request origin.')
+    require_safe_origin(request)
 
     cookie_token = request.cookies.get(settings.csrf_cookie_name)
     header_token = request.headers.get('x-csrf-token')

@@ -1,10 +1,11 @@
-import { useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowRight, ChartNoAxesCombined, LockKeyhole, Package, ShieldCheck, Sparkles } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { ArrowRight, ChartNoAxesCombined, LockKeyhole, MailCheck, Package, ShieldCheck, Sparkles } from 'lucide-react'
+import { api } from '../lib/api'
 import { useStore } from '../lib/store'
-import { safeInternalPath } from '../lib/security'
+import { passwordPolicyError, safeInternalPath } from '../lib/security'
 import { DEMO_ACCOUNTS } from '../lib/demoCredentials'
-import { Button, Field } from '../components/ui'
+import { Button, Field, Modal } from '../components/ui'
 
 function AuthLoading() {
   return (
@@ -27,6 +28,21 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [failedAttempts, setFailedAttempts] = useState(0)
   const [lockedUntil, setLockedUntil] = useState(0)
+  const [searchParams] = useSearchParams()
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const [recoveryStep, setRecoveryStep] = useState('request')
+  const [recovery, setRecovery] = useState({ username: '', email: '', token: '', newPassword: '', confirmation: '' })
+  const [recoveryResult, setRecoveryResult] = useState(null)
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
+  const [recoveryError, setRecoveryError] = useState('')
+
+  useEffect(() => {
+    const token = searchParams.get('token')
+    if (!token) return
+    setRecovery((current) => ({ ...current, token }))
+    setRecoveryStep('reset')
+    setRecoveryOpen(true)
+  }, [searchParams])
 
   if (authStatus === 'loading') return <AuthLoading />
   if (currentUser) return <Navigate to="/dashboard" replace />
@@ -67,6 +83,51 @@ export default function Login() {
     setUsername(user)
     setPassword(pass)
     setError('')
+  }
+
+  const setRecoveryField = (key, value) => setRecovery((current) => ({ ...current, [key]: value }))
+
+  const openRecovery = () => {
+    setRecovery((current) => ({ ...current, username, email: current.email || username }))
+    setRecoveryStep('request')
+    setRecoveryResult(null)
+    setRecoveryError('')
+    setRecoveryOpen(true)
+  }
+
+  const requestRecovery = async () => {
+    setRecoveryError('')
+    if (!recovery.username.trim() || !recovery.email.trim()) {
+      return setRecoveryError('Enter your owner username and the email on the account.')
+    }
+    setRecoveryBusy(true)
+    try {
+      const result = await api.forgotPassword(recovery.username.trim(), recovery.email.trim())
+      setRecoveryResult(result)
+    } catch (requestError) {
+      setRecoveryError(requestError.message)
+    } finally {
+      setRecoveryBusy(false)
+    }
+  }
+
+  const completeRecovery = async () => {
+    setRecoveryError('')
+    const policyError = passwordPolicyError(recovery.newPassword)
+    if (policyError) return setRecoveryError(policyError)
+    if (recovery.newPassword !== recovery.confirmation) return setRecoveryError('The passwords do not match.')
+    setRecoveryBusy(true)
+    try {
+      const result = await api.resetPassword(recovery.token.trim(), recovery.newPassword)
+      notify(result.message)
+      setRecoveryOpen(false)
+      setRecovery({ username: '', email: '', token: '', newPassword: '', confirmation: '' })
+      setRecoveryResult(null)
+    } catch (resetError) {
+      setRecoveryError(resetError.message)
+    } finally {
+      setRecoveryBusy(false)
+    }
   }
 
   return (
@@ -160,6 +221,12 @@ export default function Login() {
 
             {error && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
+            <div className="flex justify-end">
+              <button type="button" onClick={openRecovery} className="text-sm font-semibold text-bakery-700 hover:underline">
+                Forgot your password?
+              </button>
+            </div>
+
             <Button type="submit" variant="primary" className="w-full py-3" disabled={loading || locked || !apiAvailable}>
               {locked ? 'Temporarily locked' : loading ? 'Signing in…' : 'Sign in'}
               {!loading && !locked && <ArrowRight size={16} />}
@@ -187,6 +254,99 @@ export default function Login() {
             </div>
           </div>
         </div>
+      </div>
+
+      {recoveryOpen && (
+        <Modal
+          open
+          onClose={() => setRecoveryOpen(false)}
+          title={recoveryStep === 'request' ? 'Recover owner access' : 'Set a new password'}
+          description={recoveryStep === 'request'
+            ? 'Owner accounts are verified using the username and registered email address. Staff accounts are reset by the owner in User Management.'
+            : 'Enter the one-time code and choose a new password.'}
+          size="md"
+          footer={recoveryStep === 'request' ? (
+            <><Button onClick={() => setRecoveryOpen(false)} disabled={recoveryBusy}>Cancel</Button>
+              <Button variant="primary" onClick={requestRecovery} disabled={recoveryBusy || !apiAvailable}>
+                {recoveryBusy ? 'Requesting…' : 'Send reset code'}
+              </Button></>
+          ) : (
+            <><Button onClick={() => setRecoveryStep('request')} disabled={recoveryBusy}>Back</Button>
+              <Button variant="primary" onClick={completeRecovery} disabled={recoveryBusy || !recovery.token.trim()}>
+                {recoveryBusy ? 'Saving…' : 'Reset password'}
+              </Button></>
+          )}
+        >
+          <div className="grid gap-4">
+            {recoveryError && <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{recoveryError}</p>}
+            {recoveryStep === 'request' ? (
+              <>
+                <Field label="Owner username"><input className="input" autoComplete="username" value={recovery.username} onChange={(event) => setRecoveryField('username', event.target.value)} /></Field>
+                <Field label="Registered email"><input className="input" type="email" autoComplete="email" value={recovery.email} onChange={(event) => setRecoveryField('email', event.target.value)} /></Field>
+                {recoveryResult && (
+                  <div className="rounded-xl border border-leaf-200 bg-leaf-50 p-3 text-sm text-leaf-800">
+                    <p className="font-semibold">{recoveryResult.message}</p>
+                    {recoveryResult.emailSent && <p className="mt-1">A code has been emailed to the registered address.</p>}
+                    {recoveryResult.devToken && (
+                      <div className="mt-2">
+                        <p className="text-xs">Development code (shown once):</p>
+                        <code className="mt-1 block break-all rounded-lg bg-white p-2 font-mono text-xs">{recoveryResult.devToken}</code>
+                      </div>
+                    )}
+                    <button type="button" className="mt-3 font-semibold underline" onClick={() => {
+                      setRecovery((current) => ({ ...current, token: recoveryResult.devToken || current.token }))
+                      setRecoveryStep('reset')
+                    }}>
+                      I have a code
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <Field label="One-time code"><input className="input font-mono" value={recovery.token} onChange={(event) => setRecoveryField('token', event.target.value)} autoFocus /></Field>
+                <Field label="New password" hint="At least 12 characters"><input className="input" type="password" autoComplete="new-password" value={recovery.newPassword} onChange={(event) => setRecoveryField('newPassword', event.target.value)} /></Field>
+                <Field label="Confirm new password"><input className="input" type="password" autoComplete="new-password" value={recovery.confirmation} onChange={(event) => setRecoveryField('confirmation', event.target.value)} /></Field>
+              </>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+/** Landing page for verification links included in account emails. */
+export function VerifyEmailPage() {
+  const { authStatus, currentUser, notify } = useStore()
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const [state, setState] = useState({ status: 'working', message: '' })
+
+  useEffect(() => {
+    const token = searchParams.get('token')
+    if (!token) {
+      setState({ status: 'error', message: 'This verification link is missing its code.' })
+      return
+    }
+    api.verifyEmail(token)
+      .then((result) => {
+        setState({ status: 'done', message: result.message })
+        notify('Email address verified.')
+      })
+      .catch((error) => setState({ status: 'error', message: error.message }))
+  }, [searchParams, notify])
+
+  if (authStatus === 'loading') return <AuthLoading />
+  if (!currentUser) return <Navigate to="/login" replace />
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-5">
+      <div className="w-full max-w-md rounded-2xl border border-line bg-white p-8 text-center">
+        <MailCheck size={32} className="mx-auto text-bakery-600" />
+        <h1 className="mt-4 font-display text-2xl font-semibold">Email verification</h1>
+        <p className="mt-2 text-sm text-muted">{state.message || 'Verifying your address…'}</p>
+        <Button variant="primary" className="mt-6" onClick={() => navigate('/dashboard')}>Back to dashboard</Button>
       </div>
     </div>
   )

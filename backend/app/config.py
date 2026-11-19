@@ -34,6 +34,20 @@ class Settings(BaseSettings):
     ip_request_limit: int = 120
     ip_request_window_minutes: int = 15
 
+    # Email delivery. SMTP is required in production for recovery flows; when
+    # it is not configured, verification tokens are shown once in development.
+    smtp_host: str = ''
+    smtp_port: int = 587
+    smtp_username: str = ''
+    smtp_password: str = ''
+    smtp_from: str = ''
+    smtp_use_tls: bool = True
+    smtp_timeout_seconds: int = 10
+    frontend_url: str = 'http://localhost:5173'
+    reset_token_minutes: int = 30
+    email_verification_token_minutes: int = 60
+    mfa_challenge_minutes: int = 5
+
     seed_owner_username: str = ''
     seed_owner_password: str = ''
     seed_owner_email: str = ''

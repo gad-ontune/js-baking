@@ -80,6 +80,15 @@ def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
+# Recovery, verification and MFA challenge tokens use the same one-way digest.
+hash_security_token = hash_session_token
+
+
+def new_security_token() -> str:
+    """High-entropy single-use token. Returned to the caller once, never stored."""
+    return secrets.token_urlsafe(32)
+
+
 def new_csrf_token() -> str:
     return secrets.token_urlsafe(32)
 

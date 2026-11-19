@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend.app.config import settings  # noqa: E402
 from backend.app.database import SessionLocal, init_db  # noqa: E402
 from backend.app.models import BusinessRecord, User  # noqa: E402
-from backend.app.security import hash_password, new_id, password_policy_error  # noqa: E402
+from backend.app.security import hash_password, new_id, password_policy_error, utc_now  # noqa: E402
 from backend.scripts import seed_business  # noqa: E402
 
 # Dev-only values, mirrored in src/lib/demoCredentials.js for the demo buttons.
@@ -66,6 +66,7 @@ def main() -> int:
                 password_hash=hash_password(password),
                 role=role,
                 active=True,
+                email_verified_at=utc_now(),
             ))
             created.append(username)
 

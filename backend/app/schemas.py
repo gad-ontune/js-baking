@@ -67,6 +67,57 @@ class PasswordChangeRequest(StrictModel):
         return value
 
 
+class ForgotPasswordRequest(StrictModel):
+    username: str = Field(min_length=1, max_length=80)
+    email: str = Field(min_length=3, max_length=255)
+
+    @field_validator('username', 'email')
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class ForgotPasswordResponse(StrictModel):
+    message: str
+    email_sent: bool
+    # Development only. Never populated in a production deployment.
+    dev_token: str | None = None
+
+
+class ResetPasswordRequest(StrictModel):
+    token: str = Field(min_length=10, max_length=256)
+    new_password: str = Field(min_length=12, max_length=1024)
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        error = password_policy_error(value)
+        if error:
+            raise ValueError(error)
+        return value
+
+
+class ResetPasswordResponse(StrictModel):
+    message: str
+
+
+class ResetTokenResponse(StrictModel):
+    token: str
+    expires_at: datetime
+    email_sent: bool
+    message: str
+
+
+class EmailVerificationRequest(StrictModel):
+    token: str = Field(min_length=10, max_length=256)
+
+
+class VerificationResponse(StrictModel):
+    message: str
+    email_sent: bool
+    dev_token: str | None = None
+
+
 class RoleUpdate(StrictModel):
     role: Role
 
@@ -83,6 +134,7 @@ class UserResponse(StrictModel):
     role: Role
     active: bool
     mfa_enabled: bool
+    email_verified_at: datetime | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True, extra='forbid')
