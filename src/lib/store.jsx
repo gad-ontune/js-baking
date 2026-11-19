@@ -227,13 +227,31 @@ export function StoreProvider({ children }) {
   // no-op rather than a second, weaker session authority.
   const touchSession = useCallback(() => {}, [])
 
-  const resetDemo = useCallback(() => {
+  const resetDemo = useCallback(async () => {
+    // Profile and configuration are local-only settings, so restore those
+    // alongside the server's business collections.
     const fresh = createSeedData()
-    // Keep the authoritative account directory; only business demo data resets.
-    fresh.users = data.users.map((user) => ({ ...user }))
-    setData(fresh)
-    notify('Demo business data restored to its original state.')
-  }, [data.users, notify])
+    const restoreLocalSettings = (previous) => ({
+      ...previous,
+      business: fresh.business,
+      config: fresh.config,
+      auditLogs: fresh.auditLogs,
+      users: previous.users,
+    })
+    try {
+      await api.resetDemoBusiness()
+      setData(restoreLocalSettings)
+      await hydrateBusiness()
+      notify('Demo business data restored to its original state.')
+      return { ok: true }
+    } catch {
+      // Offline fallback only: a later successful hydration restores the
+      // server dataset again, so this is never treated as authoritative.
+      setData((previous) => ({ ...restoreLocalSettings(previous), ...fresh }))
+      notify('Server unavailable — demo data restored in this browser only.', 'error')
+      return { ok: false }
+    }
+  }, [hydrateBusiness, notify])
 
   const value = useMemo(
     () => ({

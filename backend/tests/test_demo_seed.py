@@ -4,7 +4,7 @@ import os
 
 from backend.app.config import settings
 from backend.app.database import SessionLocal
-from backend.app.models import User
+from backend.app.models import BusinessRecord, User
 from backend.app.security import password_policy_error
 from backend.scripts import seed_demo
 
@@ -36,8 +36,19 @@ def test_demo_seed_creates_all_roles(monkeypatch):
         users = {user.username: user.role for user in db.query(User).all()}
         assert users == {'amina': 'owner', 'brian': 'staff', 'wanjiku': 'manager'}
 
-        # A second run must not reset existing accounts or their passwords.
+        # One command must also prepare a complete, useful business dataset.
+        assert db.query(BusinessRecord).count() > 100
+        inventory = [
+            record.payload for record in db.query(BusinessRecord)
+            .filter(BusinessRecord.kind == 'inventory').all()
+        ]
+        assert any(item['expiryDate'] for item in inventory)
+        assert any(item['quantity'] <= item['minQuantity'] for item in inventory)
+
+        # A second run must not reset existing accounts, passwords or records.
+        before = db.query(BusinessRecord).count()
         assert seed_demo.main() == 0
         assert {user.username: user.role for user in db.query(User).all()} == users
+        assert db.query(BusinessRecord).count() == before
     finally:
         db.close()

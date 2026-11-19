@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Pencil, Plus, Settings2, Tag, Trash2, X } from 'lucide-react'
 import { useStore } from '../../lib/store'
-import { money, uid } from '../../lib/format'
+import { money } from '../../lib/format'
 import { isFiniteNumber } from '../../lib/security'
 import { Badge, Button, Card, EmptyState, Field, IconButton, Modal, PageHeader, SectionHeading, Select } from '../../components/ui'
 
@@ -17,7 +17,7 @@ const CONFIG_SECTIONS = [
 const blankProduct = () => ({ name: '', sku: '', category: 'Cakes', cost: 0, price: 0, description: '', trackedItemId: '' })
 
 export default function Configuration() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, mutate, addAudit, notify, businessWrite } = useStore()
   const [adding, setAdding] = useState({})
   const [newValues, setNewValues] = useState({})
   const [editingProduct, setEditingProduct] = useState(null)
@@ -44,24 +44,30 @@ export default function Configuration() {
     notify('Configuration updated.')
   }
 
-  const saveProduct = (form) => {
+  const saveProduct = async (form) => {
+    const payload = {
+      name: form.name.trim(),
+      category: form.category,
+      description: form.description,
+      cost: Number(form.cost),
+      price: Number(form.price),
+      trackedItemId: form.trackedItemId || null,
+    }
     if (editingProduct) {
-      mutate((draft) => {
-        Object.assign(draft.products.find((product) => product.id === editingProduct.id), form)
-        addAudit(draft, 'PRODUCT_UPDATED', 'Product', `${form.name} details updated`)
-      })
-      notify('Product updated.')
-      setEditingProduct(null)
+      const result = await businessWrite(
+        (api) => api.updateBusinessRecord('product', editingProduct.id, payload),
+        'Product updated.',
+      )
+      if (result.ok) setEditingProduct(null)
     } else {
-      mutate((draft) => {
-        draft.products.push({
-          ...form, id: uid('prod'), sku: form.sku || `PRD-${String(draft.products.length + 1).padStart(3, '0')}`,
-          archived: false, createdAt: new Date().toISOString(),
-        })
-        addAudit(draft, 'PRODUCT_CREATED', 'Product', `${form.name} added to products`)
-      })
-      notify('Product added.')
-      setCreatingProduct(false)
+      const result = await businessWrite(
+        (api) => api.createBusinessRecord('product', {
+          ...payload,
+          sku: form.sku || `PRD-${String(data.products.length + 1).padStart(3, '0')}`,
+        }),
+        'Product added.',
+      )
+      if (result.ok) setCreatingProduct(false)
     }
   }
 

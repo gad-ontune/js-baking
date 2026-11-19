@@ -1,8 +1,10 @@
-"""Create the local demo accounts used by the React sign-in screen.
+"""Create the local demo accounts and business data for the React sign-in screen.
 
-These are PUBLIC development-only credentials. They are deliberately long
-enough to satisfy the backend password policy, and this script refuses to run
-in a production environment unless JSBH_ALLOW_DEMO_SEED=true is set explicitly.
+This is the single command that prepares a local demo: it creates the three
+PUBLIC development-only accounts and then seeds the business records through
+the same service layer the API uses. Credentials are deliberately long enough
+to satisfy the backend password policy, and this script refuses to run in a
+production environment unless JSBH_ALLOW_DEMO_SEED=true is set explicitly.
 
 Usage (from the repository root):
 
@@ -20,8 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from backend.app.config import settings  # noqa: E402
 from backend.app.database import SessionLocal, init_db  # noqa: E402
-from backend.app.models import User  # noqa: E402
+from backend.app.models import BusinessRecord, User  # noqa: E402
 from backend.app.security import hash_password, new_id, password_policy_error  # noqa: E402
+from backend.scripts import seed_business  # noqa: E402
 
 # Dev-only values, mirrored in src/lib/demoCredentials.js for the demo buttons.
 DEMO_ACCOUNTS = (
@@ -71,7 +74,20 @@ def main() -> int:
         print(f'Created demo accounts: {", ".join(created) or "none"}')
         if skipped:
             print(f'Skipped existing usernames: {", ".join(skipped)}')
-        print('These credentials are for local development only. Never deploy them.')
+
+        # One command prepares a complete demo. Business records are added only
+        # when none exist, so an existing dataset is never silently overwritten.
+        if not db.query(BusinessRecord).count():
+            actor = db.query(User).filter(User.role == 'owner', User.active.is_(True)).first()
+            if actor:
+                counts = seed_business.seed_business_data(db, actor)
+                print('Seeded demo business records: ' + ', '.join(
+                    f'{key}={value}' for key, value in counts.items() if value
+                ))
+            else:
+                print('No active owner found; business records were not seeded.', file=sys.stderr)
+
+        print('These credentials and records are for local development only. Never deploy them.')
         return 0
     finally:
         db.close()

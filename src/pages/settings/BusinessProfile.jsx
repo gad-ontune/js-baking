@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Building2, MapPin, Phone, RotateCcw, Save, Store } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { formatDate } from '../../lib/format'
@@ -10,6 +10,7 @@ export default function BusinessProfile() {
   const [form, setForm] = useState(data.business)
   const [resetting, setResetting] = useState(false)
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  useEffect(() => { setForm(data.business) }, [data.business])
 
   const save = () => {
     if (!form.name.trim()) return notify('Business name is required.', 'error')

@@ -18,7 +18,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
     'staff': {
         'dashboard.view', 'inventory.view', 'production.view', 'production.manage',
-        'sales.view', 'sales.manage', 'expenses.view', 'expenses.manage',
+        'sales.view', 'sales.manage', 'expenses.view', 'expenses.manage', 'reports.basic',
     },
 }
 

@@ -12,7 +12,10 @@ class Settings(BaseSettings):
     environment: str = 'development'
 
     database_url: str = 'sqlite:///./jsbh_dev.db'
-    cors_origins: str = 'http://localhost:5173'
+    cors_origins: str = (
+        'http://localhost:5173,http://127.0.0.1:5173,'
+        'http://localhost:4173,http://127.0.0.1:4173'
+    )
 
     cookie_secure: bool = False
     cookie_samesite: str = 'lax'

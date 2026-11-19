@@ -5,7 +5,7 @@ import { compactMoney, money, number } from '../../lib/format'
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, IconButton, Modal, PageHeader, SectionHeading } from '../../components/ui'
 
 export default function InventoryCategories() {
-  const { data, mutate, addAudit, notify } = useStore()
+  const { data, mutate, addAudit, notify, businessWrite } = useStore()
   const [dialog, setDialog] = useState(null)
   const [name, setName] = useState('')
   const [error, setError] = useState('')
@@ -26,36 +26,53 @@ export default function InventoryCategories() {
     setError('')
   }
 
-  const save = () => {
+  const save = async () => {
     const trimmed = name.trim()
     if (!trimmed) return setError('Category name is required.')
     if (dialog.mode === 'add' && data.config.inventoryCategories.includes(trimmed)) return setError('This category already exists.')
+
+    if (dialog.mode === 'edit') {
+      // Inventory items are server-authoritative; rename them there first so a
+      // failed request never leaves the local view out of sync with the API.
+      const affected = data.inventory.filter((item) => item.category === dialog.category)
+      const outcome = await businessWrite(
+        (api) => Promise.all(affected.map((item) =>
+          api.updateBusinessRecord('inventory', item.id, { category: trimmed }))),
+        'Category updated.',
+      )
+      if (!outcome.ok) return
+    }
+
     mutate((draft) => {
       if (dialog.mode === 'add') {
         draft.config.inventoryCategories.push(trimmed)
         addAudit(draft, 'CATEGORY_CREATED', 'Configuration', `Inventory category "${trimmed}" created`)
       } else {
         draft.config.inventoryCategories = draft.config.inventoryCategories.map((value) => value === dialog.category ? trimmed : value)
-        draft.inventory.forEach((item) => { if (item.category === dialog.category) item.category = trimmed })
         addAudit(draft, 'CATEGORY_UPDATED', 'Configuration', `Inventory category renamed to "${trimmed}"`)
       }
     })
-    notify(dialog.mode === 'add' ? 'Category added.' : 'Category updated.')
+    if (dialog.mode === 'add') notify('Category added.')
     setDialog(null)
   }
 
-  const remove = () => {
+  const remove = async () => {
     const inUse = data.inventory.filter((item) => item.category === dialog.category)
+    if (inUse.length) {
+      const outcome = await businessWrite(
+        (api) => Promise.all(inUse.map((item) =>
+          api.updateBusinessRecord('inventory', item.id, { category: 'Other' }))),
+        'Category removed. Items were moved to "Other".',
+      )
+      if (!outcome.ok) return
+    } else {
+      notify('Category removed.')
+    }
     mutate((draft) => {
       draft.config.inventoryCategories = draft.config.inventoryCategories.filter((value) => value !== dialog.category)
-      inUse.forEach((item) => {
-        const itemInDraft = draft.inventory.find((candidate) => candidate.id === item.id)
-        itemInDraft.category = 'Other'
-      })
       if (!draft.config.inventoryCategories.includes('Other')) draft.config.inventoryCategories.push('Other')
       addAudit(draft, 'CATEGORY_DELETED', 'Configuration', `Inventory category "${dialog.category}" removed`)
     })
-    notify('Category removed. Items were moved to "Other".')
     setDialog(null)
   }
 

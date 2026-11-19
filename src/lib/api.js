@@ -162,6 +162,7 @@ export function createApiClient({
     // Business records. The server owns ids, references, totals, stock levels
     // and reversal state; the client only sends the raw user inputs.
     businessSnapshot: () => request('/business/snapshot'),
+    resetDemoBusiness: () => request('/business/demo/reset', { method: 'POST', body: {} }),
     listBusinessRecords: (kind) => request(`/business/${encodeURIComponent(kind)}`),
     createBusinessRecord: (kind, payload) =>
       request(`/business/${encodeURIComponent(kind)}`, { method: 'POST', body: payload }),

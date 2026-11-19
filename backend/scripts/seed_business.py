@@ -5,16 +5,21 @@ inventory, suppliers, products, purchases, sales, expenses, production records
 and stock movements *through the same service layer the API uses*, so the data
 is internally consistent and all totals and stock effects are server-computed.
 
-Run `seed_demo.py` first so an owner account exists to attribute records to.
+Run `seed_demo.py` first (it also calls this seeder) so an owner account exists
+to attribute records to.
 
 Usage (from the repository root):
 
     backend/.venv/bin/python backend/scripts/seed_business.py
+    backend/.venv/bin/python backend/scripts/seed_business.py --force
 
 The script is idempotent: it does nothing if business records already exist.
-It refuses to run in production unless JSBH_ALLOW_DEMO_SEED=true is set.
+`--force` replaces existing demo business records so a partially seeded or
+edited demo can be restored. It refuses to run in production unless
+JSBH_ALLOW_DEMO_SEED=true is set.
 """
 
+import argparse
 import os
 import random
 import sys
@@ -51,26 +56,42 @@ SUPPLIERS = [
 ]
 
 # name, category, unit, opening quantity, min quantity, purchase cost, selling price
+# Cocoa powder, Chocolate and Cleaning detergent deliberately open low/out so
+# the Low Stock page and dashboard alerts have realistic content.
 INVENTORY = [
     ('Flour', 'Baking Ingredients', 'kg', 120, 12, 145, None),
     ('Sugar', 'Baking Ingredients', 'kg', 90, 10, 160, None),
     ('Eggs', 'Baking Ingredients', 'Pieces', 420, 40, 18, None),
     ('Butter', 'Baking Ingredients', 'kg', 36, 8, 520, None),
     ('Milk', 'Baking Ingredients', 'L', 70, 8, 120, None),
-    ('Cocoa powder', 'Baking Ingredients', 'kg', 18, 3, 760, None),
-    ('Chocolate', 'Baking Ingredients', 'kg', 22, 3, 820, None),
+    ('Cocoa powder', 'Baking Ingredients', 'kg', 2, 3, 760, None),
+    ('Chocolate', 'Baking Ingredients', 'kg', 0, 3, 820, None),
     ('Mangoes', 'Fruits & Juice Ingredients', 'kg', 80, 10, 180, None),
     ('Passion fruits', 'Fruits & Juice Ingredients', 'kg', 40, 6, 320, None),
     ('Cake boxes', 'Packaging Materials', 'Pieces', 260, 30, 45, None),
     ('Juice bottles', 'Packaging Materials', 'Bottles', 380, 50, 35, None),
     ('Cups', 'Packaging Materials', 'Pieces', 600, 80, 8, None),
-    ('Cleaning detergent', 'Cleaning & Supplies', 'Bottles', 24, 3, 260, None),
+    ('Cleaning detergent', 'Cleaning & Supplies', 'Bottles', 2, 3, 260, None),
     ('Cakes', 'Finished Products', 'Pieces', 600, 4, 1800, 3200),
     ('Cupcakes', 'Finished Products', 'Pieces', 900, 12, 110, 260),
     ('Cake slices', 'Finished Products', 'Pieces', 700, 8, 220, 450),
     ('Fresh juices', 'Finished Products', 'L', 500, 6, 280, 620),
     ('Bottled juices', 'Finished Products', 'Bottles', 900, 20, 120, 280),
 ]
+
+# Days from today for each perishable item's expiry date. Negative values are
+# already expired, small positives expire within the warning window.
+EXPIRY_OFFSETS = {
+    'Butter': -2,
+    'Milk': 3,
+    'Mangoes': 6,
+    'Passion fruits': -1,
+    'Fresh juices': 9,
+    'Cake slices': 1,
+    'Cupcakes': 45,
+    'Cakes': 60,
+    'Bottled juices': 120,
+}
 
 # product name, category, cost, price, linked inventory item
 PRODUCTS = [
@@ -109,12 +130,18 @@ def _date(days_ago: int, hour: int = 9) -> str:
     return value.replace(hour=hour, minute=0, second=0, microsecond=0).isoformat()
 
 
-def seed_business_data(db, actor: User) -> dict[str, int]:
+def _expiry_date(days_from_today: int) -> str:
+    """Date-only string accepted by the strict inventory schema."""
+    return (utc_now() + timedelta(days=days_from_today)).date().isoformat()
+
+
+def seed_business_data(db, actor: User, request=None) -> dict[str, int]:
     """Seed demo business records. Returns a count per record kind."""
+    audit_request = request or REQUEST
     counts = {key: 0 for key in business.COLLECTION_KEYS.values()}
 
     def create(kind: str, payload: dict):
-        record = business.create_record(db, REQUEST, actor, kind, payload)
+        record = business.create_record(db, audit_request, actor, kind, payload)
         counts[business.COLLECTION_KEYS[kind]] += 1
         return record
 
@@ -132,7 +159,8 @@ def seed_business_data(db, actor: User) -> dict[str, int]:
             'name': name, 'code': f'INV-{len(inventory_ids) + 1:04d}',
             'category': category, 'description': f'{name} — {category.lower()}',
             'unit': unit, 'quantity': quantity, 'minQuantity': minimum,
-            'purchaseCost': cost, 'sellingPrice': price, 'expiryDate': '',
+            'purchaseCost': cost, 'sellingPrice': price,
+            'expiryDate': _expiry_date(EXPIRY_OFFSETS[name]) if name in EXPIRY_OFFSETS else '',
         })
         inventory_ids[name] = item['id']
 
@@ -154,7 +182,7 @@ def seed_business_data(db, actor: User) -> dict[str, int]:
                 'quantity': rng.randint(5, 25),
                 'unitCost': next(row[5] for row in INVENTORY if row[0] == name),
             })
-        create('purchase', {
+        purchase = create('purchase', {
             'supplierId': supplier_id,
             'date': _date(28 - index * 3, 8),
             'items': lines,
@@ -162,6 +190,19 @@ def seed_business_data(db, actor: User) -> dict[str, int]:
             'charges': rng.choice([0, 0, 250]),
             'notes': 'Demo supplier delivery',
         })
+        # A mix of Paid / Partially paid / Unpaid makes the balances page useful.
+        if index % 3 == 0:
+            payment_amount = purchase['balance']
+        elif index % 3 == 1:
+            payment_amount = round(purchase['balance'] / 2)
+        else:
+            payment_amount = 0
+        if payment_amount > 0:
+            business.record_payment(db, audit_request, actor, purchase['id'], {
+                'amount': payment_amount,
+                'date': _date(27 - index * 3, 10),
+                'method': rng.choice(['Cash', 'M-Pesa', 'Bank Transfer']),
+            })
 
     product_names = list(product_ids)
     for index in range(40):
@@ -204,14 +245,14 @@ def seed_business_data(db, actor: User) -> dict[str, int]:
             'notes': '',
         })
 
-    # A few audited corrections keep low-stock and expiry alerts realistic.
+    # Audited corrections keep wastage and stock-count history realistic.
     for name, movement_type, quantity, reason in [
         ('Butter', 'Wastage', 3, 'Spoiled stock written off'),
         ('Passion fruits', 'Wastage', 2, 'Overripe fruit discarded'),
         ('Cake slices', 'Adjustment', 40, 'End-of-day finished stock count'),
         ('Juice bottles', 'Adjustment', 500, 'Stock count correction after delivery'),
     ]:
-        movement = business.record_movement(db, REQUEST, actor, inventory_ids[name], {
+        movement = business.record_movement(db, audit_request, actor, inventory_ids[name], {
             'type': movement_type, 'quantity': quantity,
             'reason': reason, 'reference': f'DEMO-{movement_type[:3].upper()}',
         })
@@ -222,7 +263,21 @@ def seed_business_data(db, actor: User) -> dict[str, int]:
     return counts
 
 
+def reset_business_records(db, actor: User, request=None) -> dict[str, int]:
+    """Remove demo business records and rebuild them (local/demo use only)."""
+    db.query(BusinessRecord).delete()
+    db.commit()
+    return seed_business_data(db, actor, request)
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description='Seed local demo business records.')
+    parser.add_argument(
+        '--force', action='store_true',
+        help='Replace existing demo business records instead of skipping.',
+    )
+    args = parser.parse_args()
+
     if settings.is_production and os.environ.get('JSBH_ALLOW_DEMO_SEED', '').lower() != 'true':
         print(
             'Refusing to seed demo business records in production. '
@@ -234,16 +289,18 @@ def main() -> int:
     init_db()
     db = SessionLocal()
     try:
-        if db.query(BusinessRecord).count():
-            print('Business records already exist; nothing to seed.')
+        existing = db.query(BusinessRecord).count()
+        if existing and not args.force:
+            print('Business records already exist; nothing to seed. Use --force to replace them.')
             return 0
         actor = db.query(User).filter(User.role == 'owner', User.active.is_(True)).first()
         if not actor:
             print('No active owner found. Run seed_demo.py first.', file=sys.stderr)
             return 2
 
-        counts = seed_business_data(db, actor)
-        print('Seeded demo business records: ' + ', '.join(
+        counts = reset_business_records(db, actor) if existing else seed_business_data(db, actor)
+        action = 'Reseeded' if existing else 'Seeded'
+        print(action + ' demo business records: ' + ', '.join(
             f'{key}={value}' for key, value in counts.items() if value
         ))
         print('These records are for local development only. Never deploy them.')

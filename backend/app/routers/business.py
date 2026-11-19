@@ -5,16 +5,20 @@ endpoints: cancelled records are reversed so financial and stock history is
 preserved. Permissions and object ownership are enforced in the service layer.
 """
 
+import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from .. import business
-from ..auth import get_current_user, require_csrf
+from ..audit import record_audit
+from ..auth import get_current_user, require_csrf, require_permissions
+from ..config import settings
 from ..database import get_db
 from ..models import User
 from ..schemas import PaymentCreate, ReverseRequest
+from backend.scripts.seed_business import reset_business_records
 
 router = APIRouter(prefix='/business', tags=['business'])
 
@@ -25,6 +29,35 @@ def business_snapshot(
     actor: User = Depends(get_current_user),
 ) -> dict[str, list[dict[str, Any]]]:
     """All collections the current role is allowed to see, in one call."""
+    return business.snapshot(db, actor)
+
+
+@router.post('/demo/reset', dependencies=[Depends(require_csrf)])
+def reset_demo_business_data(
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_permissions('users.manage')),
+) -> dict[str, list[dict[str, Any]]]:
+    """Replace demo business records with the seeded dataset (owner, demo only).
+
+    This endpoint does not exist in a production deployment, so the public demo
+    credentials can never be used to wipe real business data.
+    """
+    demo_allowed = not settings.is_production or os.environ.get('JSBH_ALLOW_DEMO_SEED', '').lower() == 'true'
+    if not demo_allowed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Not found.')
+
+    counts = reset_business_records(db, actor, request)
+    record_audit(
+        db, request,
+        event_type='business',
+        action='DEMO_DATA_RESTORED',
+        entity='Configuration',
+        user_id=actor.id,
+        details='Demo business records restored from seed: ' + ', '.join(
+            f'{key}={value}' for key, value in counts.items() if value
+        ),
+    )
     return business.snapshot(db, actor)
 
 
