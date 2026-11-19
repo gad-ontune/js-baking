@@ -1,0 +1,73 @@
+# Shared location blocks for both the HTTP and TLS server. The rules at the
+# top are a small edge WAF: method, path and scanner checks before any proxying.
+if ($request_method !~ ^(GET|HEAD|POST|PATCH|OPTIONS)$) { return 405; }
+if ($request_uri ~* "(%00|\.\./|/etc/passwd|/proc/self)") { return 400; }
+if ($http_user_agent ~* "(sqlmap|nikto|acunetix|nessus|masscan|nmap|dirbuster|wpscan)") { return 403; }
+
+location ^~ /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+}
+
+location ~* (\.env|/\.git|/\.svn|/\.hg|\.(sql|bak|old|orig|zip|tar|gz|pem|key)$) {
+    deny all;
+}
+
+# Login gets a tighter edge limit in addition to the app-level Redis limiter.
+location = /api/v1/auth/login {
+    limit_req zone=jsbh_login burst=10 nodelay;
+    limit_req_status 429;
+    limit_conn jsbh_conn 20;
+    limit_conn_status 429;
+    include /etc/nginx/nginx-headers.conf;
+    proxy_pass http://backend:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    ${JSBH_FORWARDED_FOR}
+    ${JSBH_FORWARDED_PROTO}
+    proxy_set_header X-Request-ID $request_id;
+    proxy_read_timeout 60s;
+}
+
+# API traffic stays on the same origin as the SPA, so session cookies and the
+# CSRF cookie are first-party.
+location /api/ {
+    limit_req zone=jsbh_general burst=40 nodelay;
+    limit_req_status 429;
+    limit_conn jsbh_conn 20;
+    limit_conn_status 429;
+    include /etc/nginx/nginx-headers.conf;
+    proxy_pass http://backend:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    ${JSBH_FORWARDED_FOR}
+    ${JSBH_FORWARDED_PROTO}
+    proxy_set_header X-Request-ID $request_id;
+    proxy_read_timeout 60s;
+}
+
+location = /health {
+    proxy_pass http://backend:8000/health;
+    access_log off;
+}
+
+# The HTML shell must never be cached; hashed assets can be.
+location = /index.html {
+    include /etc/nginx/nginx-headers.conf;
+    add_header Cache-Control 'no-store' always;
+}
+
+location /assets/ {
+    include /etc/nginx/nginx-headers.conf;
+    expires 1y;
+    add_header Cache-Control 'public, immutable' always;
+}
+
+location ~ /\.(?!well-known) {
+    deny all;
+}
+
+location / {
+    try_files $uri $uri/ /index.html;
+}

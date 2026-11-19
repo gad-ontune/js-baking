@@ -1,0 +1,21 @@
+# Optional overlay for deployments where nginx sits behind a trusted reverse
+# proxy or load balancer that terminates TLS (for example an AWS ALB or a CDN).
+#
+#   TRUSTED_PROXY_CIDR=10.0.0.0/8 \
+#     docker compose -f docker-compose.yml -f docker-compose.trusted-proxy.yml up -d
+#
+# Only traffic from TRUSTED_PROXY_CIDR is allowed to override the client IP.
+# Keep nginx reachable only from that network; otherwise a client could forge
+# X-Forwarded-For headers and evade rate limits. When nginx is the TLS
+# terminator (docker-compose.tls.yml), do NOT use this overlay unless there is
+# also an upstream proxy that you control.
+
+services:
+  web:
+    environment:
+      JSBH_REAL_IP_CONFIG: |
+        set_real_ip_from ${TRUSTED_PROXY_CIDR:?Set TRUSTED_PROXY_CIDR to your proxy network};
+        real_ip_header X-Forwarded-For;
+        real_ip_recursive on;
+      JSBH_FORWARDED_FOR: 'proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;'
+      JSBH_FORWARDED_PROTO: 'proxy_set_header X-Forwarded-Proto $$http_x_forwarded_proto;'

@@ -1,0 +1,50 @@
+worker_processes auto;
+pid /tmp/nginx.pid;
+error_log /var/log/nginx/error.log warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    access_log /var/log/nginx/access.log;
+    sendfile on;
+    keepalive_timeout 65;
+    server_tokens off;
+    client_max_body_size 2m;
+    client_body_buffer_size 16k;
+    large_client_header_buffers 4 8k;
+
+    # Coarse edge shields in front of the application's authoritative Redis
+    # limiter. Legitimate bursts are not affected; scanners are slowed down.
+    limit_req_zone $binary_remote_addr zone=jsbh_general:10m rate=60r/m;
+    limit_req_zone $binary_remote_addr zone=jsbh_login:10m rate=20r/m;
+    limit_conn_zone $binary_remote_addr zone=jsbh_conn:10m;
+
+    # All writable paths live under directories owned by the jsbh user.
+    client_body_temp_path /var/cache/nginx/client_temp;
+    proxy_temp_path /var/cache/nginx/proxy_temp;
+    fastcgi_temp_path /var/cache/nginx/fastcgi_temp;
+    uwsgi_temp_path /var/cache/nginx/uwsgi_temp;
+    scgi_temp_path /var/cache/nginx/scgi_temp;
+
+    # Only set when nginx sits behind an explicit trusted proxy. Otherwise the
+    # direct peer is used and client-supplied X-Forwarded-For is overwritten.
+    ${JSBH_REAL_IP_CONFIG}
+
+    server {
+        listen ${JSBH_HTTP_PORT} default_server;
+        server_name ${JSBH_SERVER_NAME};
+        root /usr/share/nginx/html;
+        index index.html;
+
+        include /etc/nginx/nginx-headers.conf;
+        ${JSBH_REDIRECT_TO_HTTPS}
+        include /etc/nginx/server-locations.conf;
+    }
+
+    ${JSBH_TLS_SERVER}
+}
