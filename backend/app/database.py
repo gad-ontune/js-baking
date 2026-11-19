@@ -33,35 +33,29 @@ def get_db() -> Generator:
         db.close()
 
 
-_SQLITE_COLUMN_UPGRADES = {
-    'users': {
-        'email_verified_at': 'DATETIME',
-        'mfa_secret_enc': 'TEXT',  # nosec B105 - column name, not a credential
-    },
-    'audit_logs': {
-        'sequence_number': 'INTEGER',
-        'previous_hash': 'VARCHAR(64)',
-        'entry_hash': 'VARCHAR(64)',
-    },
-}
+def _upgrade_sqlite_schema(models_module) -> None:
+    """Add model columns introduced after the first release to local databases.
 
-
-def _upgrade_sqlite_schema() -> None:
-    """Add columns introduced after the first release to local demo databases.
-
-    Deployments on PostgreSQL use Alembic migrations instead.
+    Column names and types are read from the ORM models, so this stays correct
+    as new fields are added. PostgreSQL deployments use Alembic instead.
     """
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
     with engine.begin() as connection:
-        for table, columns in _SQLITE_COLUMN_UPGRADES.items():
+        for model in (models_module.User, models_module.AuditLog):
+            table = model.__tablename__
             if table not in tables:
                 continue
             existing = {column['name'] for column in inspector.get_columns(table)}
-            for name, column_type in columns.items():
-                if name not in existing:
-                    connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {column_type}'))
-        if 'audit_logs' in tables:
+            for column in model.__table__.columns:
+                if column.name in existing or column.primary_key:
+                    continue
+                column_type = str(column.type.compile(dialect=engine.dialect))
+                nullable = '' if column.nullable else ' NOT NULL'
+                connection.execute(text(
+                    f'ALTER TABLE {table} ADD COLUMN {column.name} {column_type}{nullable}'
+                ))
+        if models_module.AuditLog.__tablename__ in tables:
             connection.execute(text(
                 'CREATE UNIQUE INDEX IF NOT EXISTS uq_audit_logs_sequence_number '
                 'ON audit_logs (sequence_number)'
@@ -76,4 +70,4 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     if settings.database_url.startswith('sqlite'):
-        _upgrade_sqlite_schema()
+        _upgrade_sqlite_schema(models)
