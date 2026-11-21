@@ -28,6 +28,7 @@ export default [
         Set: 'readonly',
         Blob: 'readonly',
         URL: 'readonly',
+        URLSearchParams: 'readonly',
         console: 'readonly',
         setTimeout: 'readonly',
       },

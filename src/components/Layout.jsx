@@ -191,7 +191,7 @@ function Sidebar({ collapsed, onToggle, onNavigate, mobile = false, onClose }) {
 }
 
 export default function Layout() {
-  const { data, currentUser, signOut, touchSession } = useStore()
+  const { data, currentUser, signOut, touchSession, can } = useStore()
   const { unreadCount } = useNotifications()
   const location = useLocation()
   const navigate = useNavigate()
@@ -303,6 +303,19 @@ export default function Layout() {
           {data.business.name} · {formatDate(new Date(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · Internal business use
         </footer>
       </div>
+
+      {can('sales.manage') && location.pathname !== '/sales' && (
+        <button
+          type="button"
+          onClick={() => navigate('/sales?new=1')}
+          className="fixed bottom-6 right-5 z-30 flex h-14 w-14 items-center justify-center gap-2 rounded-full bg-bakery-600 text-white shadow-lift transition hover:-translate-y-0.5 hover:bg-bakery-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-bakery-200 active:translate-y-0 active:scale-95 sm:right-8 sm:w-auto sm:px-5"
+          aria-label="Quick record a sale"
+          title="Quick record a sale"
+        >
+          <ReceiptText size={20} strokeWidth={1.9} />
+          <span className="hidden text-sm font-semibold sm:inline">Quick sale</span>
+        </button>
+      )}
     </div>
   )
 }

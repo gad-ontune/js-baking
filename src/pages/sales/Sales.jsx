@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Banknote, Eye, Plus, ReceiptText, RotateCcw, Search, ShoppingBag } from 'lucide-react'
 import { useStore } from '../../lib/store'
 import { financialSummary, salesByPaymentMethod } from '../../lib/analytics'
@@ -156,6 +157,7 @@ function SaleForm({ data, onClose, onSave, error: externalError }) {
                       placeholder="Type or choose product…"
                       value={line.productName}
                       onChange={(event) => handleProductName(index, event.target.value)}
+                      autoFocus={index === 0}
                     />
                     <div className="mt-1 flex items-center gap-2">
                       {isNew && <span className="text-[10px] font-bold uppercase tracking-wide text-bakery-700">New product</span>}
@@ -227,16 +229,27 @@ function SaleDetails({ sale, data, onClose, onVoid }) {
 
 export default function Sales() {
   const { data, businessWrite } = useStore()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [period, setPeriod] = useState('30d')
   const [custom, setCustom] = useState({ from: '', to: '' })
   const [search, setSearch] = useState('')
   const [productFilter, setProductFilter] = useState('all')
   const [paymentFilter, setPaymentFilter] = useState('all')
   const [showVoided, setShowVoided] = useState(false)
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState(() => searchParams.get('new') === '1')
   const [details, setDetails] = useState(null)
   const [voiding, setVoiding] = useState(null)
   const [formError, setFormError] = useState('')
+
+  const closeForm = () => {
+    setCreating(false)
+    setFormError('')
+    if (searchParams.has('new')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('new')
+      setSearchParams(next, { replace: true })
+    }
+  }
 
   const range = useMemo(() => periodRange(period, custom), [period, custom])
   const summary = useMemo(() => financialSummary(data, range), [data, range])
@@ -266,8 +279,7 @@ export default function Sales() {
       'Sale completed. Revenue and stock updated.',
     )
     if (result.ok) {
-      setCreating(false)
-      setFormError('')
+      closeForm()
     } else {
       setFormError(result.message)
     }
@@ -357,7 +369,7 @@ export default function Sales() {
         ) : <EmptyState icon={Search} title="No sales found" description="Try another period, product or payment method." />}
       </Card>
 
-      {creating && <SaleForm data={data} onClose={() => setCreating(false)} onSave={createSale} error={formError} />}
+      {creating && <SaleForm data={data} onClose={closeForm} onSave={createSale} error={formError} />}
       {details && <SaleDetails sale={details} data={data} onClose={() => setDetails(null)} onVoid={setVoiding} />}
       {voiding && <ConfirmDialog open onClose={() => setVoiding(null)} onConfirm={voidSale} danger title="Void this sale?" description={`Voiding ${voiding.reference} will remove it from revenue reports and restore finished-product stock. The audit record is preserved.`} confirmLabel="Void sale" />}
     </div>
